@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -27,37 +28,45 @@ func distributor(p Params, c distributorChannels) {
 		nextWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
-	filename := width + "x" + width + ".pgm"
+	turnStr := strconv.Itoa(p.Turns)
+	filename := width + "x" + width + "x" + turnStr
+	fmt.Println(filename)
+	c.ioCommand <- ioInput
 	c.ioFilename <- filename
+	//read file into current world
 	for j, _ := range currentWorld	{
 		for k, _ := range currentWorld[j]	{
 			currentWorld[j][k] = <- c.ioInput
 		}
 	}
-
-	turn := 0
+	//fine up to here (works on 0 turns)
 
 
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
-	for turn := turn; turn < turns; turn++ {
-		calculateNextState(currentWorld, nextWorld)
+	for turn := 0; turn < turns; turn++ {
 		for i := range currentWorld	{
 			for j := range currentWorld[i]	{
-				currentWorld[i] = nextWorld[j]
+				if getNumSurroundingCells(i, j, currentWorld) == 3 {
+					nextWorld[i][j] = 0xFF
+				}	else if getNumSurroundingCells(i, j, currentWorld) < 2	{
+					nextWorld[i][j] = 0
+				}	else if getNumSurroundingCells(i, j, currentWorld) > 3	{
+					nextWorld[i][j] = 0
+				}	else if getNumSurroundingCells(i, j, currentWorld) == 2 {
+					nextWorld[i][j] = currentWorld[i][j]
+				}
 			}
 		}
-
 	}
-
-	aliveCells := make([]util.Cell, 0, 100)
+	//calculate the alive cells
+	aliveCells := make([]util.Cell, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
 		for j, _ := range currentWorld[i] {
-			if currentWorld[i][j] == 255	{
-				var newCell = util.Cell{X: j, Y: i}
+			if currentWorld[i][j] == 0xFF	{
+				newCell := util.Cell{X: j, Y: i}
 				aliveCells = append(aliveCells, newCell)
 			}
 		}
@@ -68,34 +77,16 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
-
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	c.events <- StateChange{turn, Quitting}
+	c.events <- StateChange{turns, Quitting}
 	
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
 
-func calculateNextState(currentWorld [][]byte, newWorld [][]byte) [][]byte {
-	//make the cells active according to the rules
-	for i , _ := range newWorld	{
-		for j, _ := range newWorld[i]	{
-			if getNumSurroundingCells(i, j, currentWorld) == 3 {
-				newWorld[i][j] = 255
-			}	else if getNumSurroundingCells(i, j, currentWorld) < 2	{
-				newWorld[i][j] = 0
-			}	else if getNumSurroundingCells(i, j, currentWorld) > 3	{
-				newWorld[i][j] = 0
-			}	else if getNumSurroundingCells(i, j, currentWorld) == 2 {
-				newWorld[i][j] = currentWorld[i][j]
-			}
-		}
-	}
-	return newWorld
-}
 //count number of active cells surrounding a current cell
 func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 	var counter = 0
@@ -115,28 +106,28 @@ func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 	if prevY < 0	{
 		prevY = len(world[x]) - 1
 	}
-	if world[prevX][y] == 255	{
+	if world[prevX][y] == 0xFF	{
 		counter++
 	}
-	if world[prevX][prevY] == 255 {
+	if world[prevX][prevY] == 0xFF {
 		counter++
 	}
-	if world[prevX][succY] == 255 {
+	if world[prevX][succY] == 0xFF {
 		counter++
 	}
-	if world[x][succY] == 255 {
+	if world[x][succY] == 0xFF {
 		counter++
 	}
-	if world[x][prevY] == 255 {
+	if world[x][prevY] == 0xFF {
 		counter++
 	}
-	if world[succX][y] == 255 {
+	if world[succX][y] == 0xFF {
 		counter++
 	}
-	if world[succX][succY] == 255 {
+	if world[succX][succY] == 0xFF {
 		counter++
 	}
-	if world[succX][prevY] == 255 {
+	if world[succX][prevY] == 0xFF {
 		counter++
 	}
 	return counter
