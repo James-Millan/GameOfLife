@@ -43,8 +43,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 	//fine up to here (works on 0 turns)
 
-
-	// TODO: Execute all turns of the Game of Life.
+	//Execute all turns of the Game of Life.
 	turns := p.Turns
 	for turn := 0; turn < turns; turn++ {
 		for i := range currentWorld	{
@@ -72,8 +71,7 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-
-	// TODO: Report the final state using FinalTurnCompleteEvent.
+	//Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
