@@ -1,7 +1,6 @@
 package gol
 
 import (
-	"fmt"
 	"strconv"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -22,17 +21,10 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0; i < p.ImageWidth; i++ {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
-	//Create a second 2D slice to store next state of the world (odd numbered turns)
-	/*nextWorld := make([][]byte, p.ImageWidth)
-	for i := 0; i < p.ImageWidth; i++ {
-		nextWorld[i] = make([]byte, p.ImageHeight)
-	}*/
-	nextWorld := [][]byte{}
 
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
-	fmt.Println(filename)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
 	//read file into current world
@@ -51,10 +43,13 @@ func distributor(p Params, c distributorChannels) {
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
+		nextWorld := [][]byte{}
 		//Splitting up world and distributing to channels
+		remainderThreads := len(currentWorld) % p.Threads
+		offset := 0
 		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
 			go processNewSlice(workerChannels[sliceNum])
-			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld)
+			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
 			workerChannels[sliceNum] <- currentSlice
 		}
 		//Reconstructing image from worker channels
@@ -62,6 +57,14 @@ func distributor(p Params, c distributorChannels) {
 			nextSlice := <- workerChannels[i]
 			for j := range nextSlice{
 				nextWorld = append(nextWorld, nextSlice[j])
+			}
+		}
+		//update current world.
+		if turns > 0	{
+			for i := range nextWorld	{
+				for j := range nextWorld[i]	{
+					currentWorld[i][j] = nextWorld[i][j]
+				}
 			}
 		}
 	}
@@ -93,15 +96,22 @@ func distributor(p Params, c distributorChannels) {
 }
 
 //Helper function for splitting the world into slices
-func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte) [][]byte{
+func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remainderThreads *int,offset *int) [][]byte{
 	currentSlice := [][]byte{}
-	//Adding extra column to back and front of slice to avoid lines of cells that aren't processed
-	extraBackColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1,len(currentWorld))
-	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel,len(currentWorld))
+	//Adding extra column to back of slice to avoid lines of cells that aren't processed
+	extraBackColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1 + *offset,len(currentWorld))
 	currentSlice = append(currentSlice,currentWorld[extraBackColumnIndex])
 	for i := 0;i < columnsPerChannel;i++{
-		currentSlice = append(currentSlice,currentWorld[sliceNum * columnsPerChannel + i])
+		currentSlice = append(currentSlice,currentWorld[sliceNum * columnsPerChannel + i + *offset])
 	}
+	//Adding extra column to this thread if the world doesn't split into each thread without remainders
+	if *remainderThreads > 0 {
+		*remainderThreads -= 1
+		*offset += 1
+		currentSlice = append(currentSlice,currentWorld[boundNumber(sliceNum * columnsPerChannel + columnsPerChannel - 1 + *offset,len(currentWorld))])
+	}
+	//Adding extra column to front of slice to avoid lines of cells that aren't processed
+	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
 	currentSlice = append(currentSlice,currentWorld[extraFrontColumnIndex])
 	return currentSlice
 }
@@ -110,21 +120,20 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte) [][]by
 func processNewSlice(channel chan [][]byte) {
 	currentSlice := <- channel
 	//Making new slice to write changes to
-	nextSlice := make([][]byte, len(currentSlice))
-	for i := 0; i < len(currentSlice); i++ {
-		nextSlice[i] = make([]byte, len(currentSlice[i]))
+	nextSlice := make([][]byte, len(currentSlice) - 2)
+	for i := range nextSlice{
+		nextSlice[i] = make([]byte, len(currentSlice[0]))
 	}
-
-	for i := 1; i < len(currentSlice) - 2;i++	{
+	for i := 1;i < len(currentSlice) - 1;i++	{
 		for j := range currentSlice[i]	{
 			if getNumSurroundingCells(i, j, currentSlice) == 3 {
-				nextSlice[i][j] = 0xFF
+				nextSlice[i-1][j] = 0xFF
 			}	else if getNumSurroundingCells(i, j, currentSlice) < 2	{
-				nextSlice[i][j] = 0
+				nextSlice[i-1][j] = 0
 			}	else if getNumSurroundingCells(i, j, currentSlice) > 3	{
-				nextSlice[i][j] = 0
+				nextSlice[i-1][j] = 0
 			}	else if getNumSurroundingCells(i, j, currentSlice) == 2 {
-				nextSlice[i][j] = currentSlice[i][j]
+				nextSlice[i-1][j] = currentSlice[i][j]
 			}
 		}
 	}
