@@ -31,8 +31,7 @@ func distributor(p Params, c distributorChannels) {
 
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
-	turnStr := strconv.Itoa(p.Turns)
-	filename := width + "x" + width + "x" + turnStr
+	filename := width + "x" + width
 	fmt.Println(filename)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
