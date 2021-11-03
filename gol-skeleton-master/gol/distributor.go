@@ -30,8 +30,7 @@ func distributor(p Params, c distributorChannels) {
 
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
-	turnStr := strconv.Itoa(p.Turns)
-	filename := width + "x" + width + "x" + turnStr
+	filename := width + "x" + width
 	fmt.Println(filename)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
@@ -60,7 +59,19 @@ func distributor(p Params, c distributorChannels) {
 				}
 			}
 		}
+		//update current world.
+		if turns > 0	{
+			for i := range nextWorld	{
+				for j := range nextWorld[i]	{
+					currentWorld[i][j] = nextWorld[i][j]
+					currentWorld[i][j] = nextWorld[i][j]
+				}
+			}
+		}
+
 	}
+
+
 	//calculate the alive cells
 	aliveCells := make([]util.Cell, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
