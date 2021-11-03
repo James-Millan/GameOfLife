@@ -22,16 +22,9 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0; i < p.ImageWidth; i++ {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
-	//Create a second 2D slice to store next state of the world (odd numbered turns)
-	nextWorld := make([][]byte, p.ImageWidth)
-	for i := 0; i < p.ImageWidth; i++ {
-		nextWorld[i] = make([]byte, p.ImageHeight)
-	}
-
-	//TODO read in initial state of GOL using io.go
+	//read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
-	turnStr := strconv.Itoa(p.Turns)
-	filename := width + "x" + width + "x" + turnStr
+	filename := width + "x" + width
 	fmt.Println(filename)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
@@ -41,25 +34,46 @@ func distributor(p Params, c distributorChannels) {
 			currentWorld[j][k] = <- c.ioInput
 		}
 	}
-	//fine up to here (works on 0 turns)
+
+	//initialise channels that are sent to workers.
+	workerChannels := make([]chan [][]byte, p.Threads)
+	for j := range workerChannels	{
+		workerChannels[j] = make(chan [][]byte)
+	}
+
 
 	//Execute all turns of the Game of Life.
 	turns := p.Turns
 	for turn := 0; turn < turns; turn++ {
-		for i := range currentWorld	{
-			for j := range currentWorld[i]	{
-				if getNumSurroundingCells(i, j, currentWorld) == 3 {
-					nextWorld[i][j] = 0xFF
-				}	else if getNumSurroundingCells(i, j, currentWorld) < 2	{
-					nextWorld[i][j] = 0
-				}	else if getNumSurroundingCells(i, j, currentWorld) > 3	{
-					nextWorld[i][j] = 0
-				}	else if getNumSurroundingCells(i, j, currentWorld) == 2 {
-					nextWorld[i][j] = currentWorld[i][j]
+		//run the workers and reassemble the slices.
+		var nextWorld [][]byte
+		var counter = 0
+		if p.Threads == 1	{
+			nextWorld = processNextState(0, p.ImageWidth - 1, currentWorld, currentWorld)
+		} else {
+			for i := 0;i < p.Threads;i++ {
+				columnsPerChannel := len(currentWorld)/p.Threads
+				start := counter
+				end := counter + columnsPerChannel
+				slice := make([][]byte, columnsPerChannel)
+				for i := range slice	{
+					slice[i] = make([]byte, p.ImageHeight)
+				}
+				go worker(start, end, workerChannels[i], slice, currentWorld)
+				nextWorld = append(nextWorld, <-workerChannels[i]...)
+				counter = end
 				}
 			}
+		fmt.Println(len(nextWorld))
+		for i := range nextWorld {
+			for j := range nextWorld[i] {
+				currentWorld[i][j] = nextWorld[i][j]
+
+			}
 		}
+
 	}
+
 	//calculate the alive cells
 	aliveCells := make([]util.Cell, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
@@ -85,26 +99,58 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
+
+//Sends the next state of a slice to the given channel, should be run as goroutine
+func processNextState(start, end int, slice [][]byte, world [][]byte ) [][] byte {
+	//Making new slice to write changes to
+	nextSlice := make([][]byte, len(slice))
+	for i := 0; i < len(slice); i++ {
+		nextSlice[i] = make([]byte, len(slice[i]))
+	}
+
+	for i := range slice	{
+		for j := start; j < end; j++	{
+			if getNumSurroundingCells(i, j, world) == 3 {
+				nextSlice[i][j] = 0xFF
+			}	else if getNumSurroundingCells(i, j, world) < 2	{
+				nextSlice[i][j] = 0
+			}	else if getNumSurroundingCells(i, j, world) > 3	{
+				nextSlice[i][j] = 0
+			}	else if getNumSurroundingCells(i, j, world) == 2 {
+				nextSlice[i][j] = world[i][j]
+			}
+		}
+	}
+	fmt.Println(len(nextSlice))
+	return nextSlice
+}
+
+func worker( start, end int, out chan<- [][]byte, slice [][]byte, world [][]byte)	{
+	result := processNextState(start, end, slice, world )
+	out <- result
+}
+
+
 //count number of active cells surrounding a current cell
-func getNumSurroundingCells(x int, y int, world [][]byte)	int{
+func getNumSurroundingCells(x int, y int, world [][]byte)	int {
 	var counter = 0
 	var succX = x + 1
 	var succY = y + 1
 	var prevX = x - 1
 	var prevY = y - 1
-	if	succX >= len(world)	{
+	if succX >= len(world) {
 		succX = 0
 	}
-	if succY >= len(world[x])	{
+	if succY >= len(world[x]) {
 		succY = 0
 	}
-	if prevX < 0	{
+	if prevX < 0 {
 		prevX = len(world) - 1
 	}
-	if prevY < 0	{
+	if prevY < 0 {
 		prevY = len(world[x]) - 1
 	}
-	if world[prevX][y] == 0xFF	{
+	if world[prevX][y] == 0xFF {
 		counter++
 	}
 	if world[prevX][prevY] == 0xFF {
@@ -129,5 +175,16 @@ func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 		counter++
 	}
 	return counter
-
 }
+
+func boundNumber(num int,worldLen int) int {
+	if num < 0 {
+		return worldLen - 1
+	} else if num > (worldLen - 1) {
+		return num - worldLen
+	} else {
+		return num
+	}
+}
+
+
