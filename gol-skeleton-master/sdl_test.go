@@ -1,15 +1,15 @@
 package main
 
 import (
-"flag"
-"fmt"
-"os"
-"runtime"
-"testing"
-"time"
+	"flag"
+	"fmt"
+	"os"
+	"runtime"
+	"testing"
+	"time"
 
-"uk.ac.bris.cs/gameoflife/gol"
-"uk.ac.bris.cs/gameoflife/sdl"
+	"uk.ac.bris.cs/gameoflife/gol"
+	"uk.ac.bris.cs/gameoflife/sdl"
 )
 
 var sdlEvents chan gol.Event
@@ -127,3 +127,5 @@ func TestSdl(t *testing.T) {
 		}
 	})
 }
+
+
