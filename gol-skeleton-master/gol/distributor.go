@@ -2,6 +2,9 @@ package gol
 
 import (
 	"strconv"
+	"time"
+
+	//"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -22,7 +25,13 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	//TODO read in initial state of GOL using io.go
+	/*
+	//TODO make a ticker that sends the alive cells count down the events channel
+
+
+
+	 */
+	//read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
 	c.ioCommand <- ioInput
@@ -39,8 +48,19 @@ func distributor(p Params, c distributorChannels) {
 		workerChannels = append(workerChannels, make(chan [][]byte))
 	}
 
-	// TODO: Execute all turns of the Game of Life.
+	//Execute all turns of the Game of Life.
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				c.events <- AliveCellsCount{CellsCount: getAliveCellsCount(currentWorld)}
+			}
+		}
+	}()
 	turns := p.Turns
+
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
@@ -60,31 +80,17 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 		//update current world.
-		if turns > 0	{
 			for i := range nextWorld	{
 				for j := range nextWorld[i]	{
 					currentWorld[i][j] = nextWorld[i][j]
 				}
 			}
-		}
 	}
 
-	//calculate the alive cells
-	aliveCells := make([]util.Cell, 0, p.ImageWidth * p.ImageHeight)
-	for i , _ := range currentWorld {
-		for j, _ := range currentWorld[i] {
-			if currentWorld[i][j] == 0xFF	{
-				newCell := util.Cell{X: j, Y: i}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
-
-
-	// TODO: Report the final state using FinalTurnCompleteEvent.
+	//Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
-		Alive: aliveCells}
+		Alive: getAliveCells(currentWorld)}
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
@@ -114,6 +120,33 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
 	currentSlice = append(currentSlice,currentWorld[extraFrontColumnIndex])
 	return currentSlice
+}
+
+//calculates the alive cells given the current world
+func getAliveCells(currentWorld [][]byte) []util.Cell	{
+	aliveCells := make([]util.Cell, 0)
+	for i , _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF	{
+				newCell := util.Cell{X: j, Y: i}
+				aliveCells = append(aliveCells, newCell)
+			}
+		}
+	}
+	return aliveCells
+}
+
+//calculates the number of alive cells given the current world
+func getAliveCellsCount(currentWorld [][]byte) int	{
+	counter := 0
+	for i , _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF	{
+				counter++
+			}
+		}
+	}
+	return counter
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
