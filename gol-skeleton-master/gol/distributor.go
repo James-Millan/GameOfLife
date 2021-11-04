@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -25,12 +26,23 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	/*
+
 	//TODO make a ticker that sends the alive cells count down the events channel
+	ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					cells := getAliveCellsCount(currentWorld)
+					c.events <- AliveCellsCount{CellsCount: cells}
+					fmt.Println("number of alive cells is " + strconv.Itoa(cells))
+				}
+			}
+		}()
+	time.Sleep(40 * time.Second)
 
 
-
-	 */
 	//read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
@@ -49,16 +61,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	//Execute all turns of the Game of Life.
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				c.events <- AliveCellsCount{CellsCount: getAliveCellsCount(currentWorld)}
-			}
-		}
-	}()
+
 	turns := p.Turns
 
 	columnsPerChannel := len(currentWorld) / p.Threads
