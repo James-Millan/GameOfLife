@@ -107,8 +107,9 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 	//Adding extra column to this thread if the world doesn't split into each thread without remainders
 	if *remainderThreads > 0 {
 		*remainderThreads -= 1
+		currentSlice = append(currentSlice,
+			currentWorld[boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))])
 		*offset += 1
-		currentSlice = append(currentSlice,currentWorld[boundNumber(sliceNum * columnsPerChannel + columnsPerChannel - 1 + *offset,len(currentWorld))])
 	}
 	//Adding extra column to front of slice to avoid lines of cells that aren't processed
 	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
