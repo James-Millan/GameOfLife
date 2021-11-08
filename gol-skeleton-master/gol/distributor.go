@@ -40,7 +40,6 @@ func distributor(p Params, c distributorChannels) {
 				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: k},CompletedTurns: 0}
 			}
 			currentWorld[j][k] = newPixel
-
 		}
 	}
 
@@ -78,8 +77,13 @@ func distributor(p Params, c distributorChannels) {
 		default:
 		}
 		//update current world.
-		if turns > 0	{
-			currentWorld = nextWorld
+		for i := range currentWorld	{
+			for j := range currentWorld[i]	{
+				if currentWorld[i][j] != nextWorld[i][j]	{
+					c.events <- CellFlipped{Cell: util.Cell{X: i,Y: j},CompletedTurns: turns}
+				}
+				currentWorld[i][j] = nextWorld[i][j]
+			}
 		}
 		turnCounter += 1
 		c.events <- TurnComplete{CompletedTurns: turnCounter}
@@ -173,7 +177,6 @@ func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 	}
 	for i := 1;i < len(currentSlice) - 1;i++	{
 		for j := range currentSlice[i]	{
-			currentPixel := currentSlice[i-1][j]
 			if getNumSurroundingCells(i, j, currentSlice) == 3 {
 				nextSlice[i-1][j] = 0xFF
 			}	else if getNumSurroundingCells(i, j, currentSlice) < 2	{
@@ -182,9 +185,6 @@ func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 				nextSlice[i-1][j] = 0
 			}	else if getNumSurroundingCells(i, j, currentSlice) == 2 {
 				nextSlice[i-1][j] = currentSlice[i][j]
-			}
-			if nextSlice[i-1][j] != currentPixel{
-				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: i},CompletedTurns: turns}
 			}
 		}
 	}
