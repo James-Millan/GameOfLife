@@ -14,6 +14,7 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+	keyPresses <-chan rune
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -48,8 +49,32 @@ func distributor(p Params, c distributorChannels) {
 		workerChannels = append(workerChannels, make(chan [][]byte))
 	}
 
-	// TODO: Execute all turns of the Game of Life.
+	//TODO implement keypress logic.
+
+	// Execute all turns of the Game of Life.
 	turnCounter := 0
+
+
+	/*go func() {
+		for  {
+			select {
+			case command := <-c.keyPresses:
+				switch command	{
+				case 'p':
+					fmt.Println("p")
+				case 's':
+					fmt.Println("s")
+					writeFile(p, c, currentWorld, turnCounter)
+				case 'q':
+					fmt.Println("q")
+					writeAndQuit(p, c, currentWorld, turnCounter)
+				}
+			default:
+			}
+		}
+	}()
+
+	 */
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
@@ -73,7 +98,26 @@ func distributor(p Params, c distributorChannels) {
 		case <-ticker.C:
 			cells := getAliveCellsCount(currentWorld)
 			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
-			fmt.Println("number of alive cells is " + strconv.Itoa(cells))
+		default:
+		}
+		select {
+		case command := <-c.keyPresses:
+			switch command	{
+			case 'p':
+				fmt.Println("p")
+				for  {
+					unPause :=  <-c.keyPresses
+					if unPause == 'p'	{
+						break
+					}
+				}
+			case 's':
+				fmt.Println("s")
+				writeFile(p, c, currentWorld, turnCounter)
+			case 'q':
+				fmt.Println("q")
+				writeAndQuit(p, c, currentWorld, turnCounter)
+			}
 		default:
 		}
 		//update current world.
@@ -101,32 +145,12 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
-	//filename
-	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.Turns)
-	//ioCommand
-	c.ioCommand <- ioOutput
-	c.ioFilename <- outFile
-	//write file bit by bit.
-	for i := range currentWorld	{
-		for j := range currentWorld[i]	{
-			c.ioOutput <- currentWorld[i][j]
-		}
-	}
-
-
-	// Make sure that the Io has finished any output before exiting.
+	writeFile(p, c, currentWorld, turns)
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
-
-	c.events <- ImageOutputComplete{
-		CompletedTurns: turns,
-		Filename: outFile,
-	}
-
 	c.events <- StateChange{turns, Quitting}
 	
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
@@ -231,11 +255,43 @@ func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 }
 
 func boundNumber(num int,worldLen int) int{
-	if(num < 0){
+	if num < 0 {
 		return num + worldLen
-	}else if(num > worldLen - 1){
+	}else if num > worldLen - 1 {
 		return num - worldLen
 	}else{
 		return num
 	}
+}
+
+func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int)	{
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.Turns)
+	c.ioCommand <- ioOutput
+	c.ioFilename <- outFile
+
+	//write file bit by bit.
+	for i := range currentWorld	{
+		for j := range currentWorld[i]	{
+			c.ioOutput <- currentWorld[i][j]
+		}
+	}
+	// Make sure that the Io has finished any output before exiting.
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+
+	c.events <- ImageOutputComplete{
+		CompletedTurns: turns,
+		Filename: outFile,
+	}
+
+}
+
+func writeAndQuit(p Params, c distributorChannels, currentWorld [][]byte, turns int)	{
+	writeFile(p, c, currentWorld, turns)
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+	c.events <- StateChange{turns, Quitting}
+
+	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	close(c.events)
 }
