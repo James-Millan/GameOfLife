@@ -61,11 +61,7 @@ func distributor(p Params, c distributorChannels) {
 		}
 		//update current world.
 		if turns > 0	{
-			for i := range nextWorld	{
-				for j := range nextWorld[i]	{
-					currentWorld[i][j] = nextWorld[i][j]
-				}
-			}
+			currentWorld = nextWorld
 		}
 	}
 
