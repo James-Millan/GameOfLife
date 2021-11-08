@@ -1,7 +1,9 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -22,6 +24,9 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
@@ -40,6 +45,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	// TODO: Execute all turns of the Game of Life.
+	turnCounter := 0
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
@@ -59,10 +65,19 @@ func distributor(p Params, c distributorChannels) {
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
+		select {
+		case <-ticker.C:
+			cells := getAliveCellsCount(currentWorld)
+			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
+			fmt.Println("number of alive cells is " + strconv.Itoa(cells))
+		default:
+		}
 		//update current world.
 		if turns > 0	{
 			currentWorld = nextWorld
 		}
+
+		turnCounter += 1
 	}
 
 	//calculate the alive cells
@@ -110,6 +125,19 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
 	currentSlice = append(currentSlice,currentWorld[extraFrontColumnIndex])
 	return currentSlice
+}
+
+//calculates the number of alive cells given the current world
+func getAliveCellsCount(currentWorld [][]byte) int	{
+	counter := 0
+	for i , _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF	{
+				counter++
+			}
+		}
+	}
+	return counter
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
