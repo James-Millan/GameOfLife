@@ -96,6 +96,18 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
+	//filename
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth)
+	//ioCommand
+	c.ioCommand <- ioOutput
+	c.ioFilename <- outFile
+	//write file bit by bit.
+	for i := range currentWorld	{
+		for j := range currentWorld[i]	{
+			c.ioOutput <- currentWorld[i][j]
+		}
+	}
+
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
