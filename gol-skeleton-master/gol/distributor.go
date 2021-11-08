@@ -35,7 +35,12 @@ func distributor(p Params, c distributorChannels) {
 	//read file into current world
 	for j, _ := range currentWorld	{
 		for k, _ := range currentWorld[j]	{
-			currentWorld[j][k] = <- c.ioInput
+			newPixel := <-c.ioInput
+			if newPixel == 0xFF{
+				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: k},CompletedTurns: 0}
+			}
+			currentWorld[j][k] = newPixel
+
 		}
 	}
 
@@ -54,7 +59,7 @@ func distributor(p Params, c distributorChannels) {
 		remainderThreads := len(currentWorld) % p.Threads
 		offset := 0
 		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
-			go processNewSlice(workerChannels[sliceNum])
+			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
 			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
 			workerChannels[sliceNum] <- currentSlice
 		}
@@ -76,8 +81,8 @@ func distributor(p Params, c distributorChannels) {
 		if turns > 0	{
 			currentWorld = nextWorld
 		}
-
 		turnCounter += 1
+		c.events <- TurnComplete{CompletedTurns: turnCounter}
 	}
 
 	//calculate the alive cells
@@ -108,9 +113,15 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
+
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
+
+	c.events <- ImageOutputComplete{
+		CompletedTurns: turns,
+		Filename: outFile,
+	}
 
 	c.events <- StateChange{turns, Quitting}
 	
@@ -153,7 +164,7 @@ func getAliveCellsCount(currentWorld [][]byte) int	{
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
-func processNewSlice(channel chan [][]byte) {
+func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 	currentSlice := <- channel
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice) - 2)
@@ -162,6 +173,7 @@ func processNewSlice(channel chan [][]byte) {
 	}
 	for i := 1;i < len(currentSlice) - 1;i++	{
 		for j := range currentSlice[i]	{
+			currentPixel := currentSlice[i-1][j]
 			if getNumSurroundingCells(i, j, currentSlice) == 3 {
 				nextSlice[i-1][j] = 0xFF
 			}	else if getNumSurroundingCells(i, j, currentSlice) < 2	{
@@ -170,6 +182,9 @@ func processNewSlice(channel chan [][]byte) {
 				nextSlice[i-1][j] = 0
 			}	else if getNumSurroundingCells(i, j, currentSlice) == 2 {
 				nextSlice[i-1][j] = currentSlice[i][j]
+			}
+			if nextSlice[i-1][j] != currentPixel{
+				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: i},CompletedTurns: turns}
 			}
 		}
 	}
