@@ -97,7 +97,7 @@ func distributor(p Params, c distributorChannels) {
 		CompletedTurns: turns,
 		Alive: aliveCells}
 	//filename
-	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth)
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.Turns)
 	//ioCommand
 	c.ioCommand <- ioOutput
 	c.ioFilename <- outFile
