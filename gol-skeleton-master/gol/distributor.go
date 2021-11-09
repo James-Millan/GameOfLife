@@ -1,7 +1,9 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -22,6 +24,9 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
@@ -30,7 +35,12 @@ func distributor(p Params, c distributorChannels) {
 	//read file into current world
 	for j, _ := range currentWorld	{
 		for k, _ := range currentWorld[j]	{
-			currentWorld[j][k] = <- c.ioInput
+			newPixel := <-c.ioInput
+			if newPixel == 0xFF{
+				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: k},CompletedTurns: 0}
+			}
+			currentWorld[j][k] = newPixel
+
 		}
 	}
 
@@ -40,6 +50,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	// TODO: Execute all turns of the Game of Life.
+	turnCounter := 0
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
@@ -48,7 +59,7 @@ func distributor(p Params, c distributorChannels) {
 		remainderThreads := len(currentWorld) % p.Threads
 		offset := 0
 		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
-			go processNewSlice(workerChannels[sliceNum])
+			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
 			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
 			workerChannels[sliceNum] <- currentSlice
 		}
@@ -59,14 +70,19 @@ func distributor(p Params, c distributorChannels) {
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
+		select {
+		case <-ticker.C:
+			cells := getAliveCellsCount(currentWorld)
+			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
+			fmt.Println("number of alive cells is " + strconv.Itoa(cells))
+		default:
+		}
 		//update current world.
 		if turns > 0	{
-			for i := range nextWorld	{
-				for j := range nextWorld[i]	{
-					currentWorld[i][j] = nextWorld[i][j]
-				}
-			}
+			currentWorld = nextWorld
 		}
+		turnCounter += 1
+		c.events <- TurnComplete{CompletedTurns: turnCounter}
 	}
 
 	//calculate the alive cells
@@ -85,9 +101,27 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
+	//filename
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.Turns)
+	//ioCommand
+	c.ioCommand <- ioOutput
+	c.ioFilename <- outFile
+	//write file bit by bit.
+	for i := range currentWorld	{
+		for j := range currentWorld[i]	{
+			c.ioOutput <- currentWorld[i][j]
+		}
+	}
+
+
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
+
+	c.events <- ImageOutputComplete{
+		CompletedTurns: turns,
+		Filename: outFile,
+	}
 
 	c.events <- StateChange{turns, Quitting}
 	
@@ -117,8 +151,21 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 	return currentSlice
 }
 
+//calculates the number of alive cells given the current world
+func getAliveCellsCount(currentWorld [][]byte) int	{
+	counter := 0
+	for i , _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF	{
+				counter++
+			}
+		}
+	}
+	return counter
+}
+
 //Sends the next state of a slice to the given channel, should be run as goroutine
-func processNewSlice(channel chan [][]byte) {
+func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 	currentSlice := <- channel
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice) - 2)
@@ -127,6 +174,7 @@ func processNewSlice(channel chan [][]byte) {
 	}
 	for i := 1;i < len(currentSlice) - 1;i++	{
 		for j := range currentSlice[i]	{
+			currentPixel := currentSlice[i-1][j]
 			if getNumSurroundingCells(i, j, currentSlice) == 3 {
 				nextSlice[i-1][j] = 0xFF
 			}	else if getNumSurroundingCells(i, j, currentSlice) < 2	{
@@ -135,6 +183,9 @@ func processNewSlice(channel chan [][]byte) {
 				nextSlice[i-1][j] = 0
 			}	else if getNumSurroundingCells(i, j, currentSlice) == 2 {
 				nextSlice[i-1][j] = currentSlice[i][j]
+			}
+			if nextSlice[i-1][j] != currentPixel{
+				c.events <- CellFlipped{Cell: util.Cell{X: j,Y: i},CompletedTurns: turns}
 			}
 		}
 	}
