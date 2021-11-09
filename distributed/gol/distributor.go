@@ -42,19 +42,17 @@ func distributor(p Params, c distributorChannels) {
 
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
-	//Create a second 2D slice to store next state of the world (odd numbered turns)
-	/*nextWorld := make([][]byte, p.ImageWidth)
-	for i := 0; i < p.ImageWidth; i++ {
-		nextWorld[i] = make([]byte, p.ImageHeight)
-	}*/
+
 	client, err := rpc.Dial("tcp", "127.0.0.1:8030")
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
-	req := stubs.Request{CurrentWorld: currentWorld}
+	req := stubs.Request{CurrentWorld: currentWorld,Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
+
+	currentWorld = resp.NextWorld
 
 	//calculate the alive cells
 	aliveCells := make([]util.Cell, 0, p.ImageWidth*p.ImageHeight)
