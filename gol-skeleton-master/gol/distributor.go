@@ -129,7 +129,7 @@ func distributor(p Params, c distributorChannels) {
 				currentWorld[i][j] = nextWorld[i][j]
 			}
 		}
-		turnCounter += 1
+		turnCounter ++
 		c.events <- TurnComplete{CompletedTurns: turnCounter}
 	}
 
@@ -143,8 +143,6 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
-
-
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive: aliveCells}
