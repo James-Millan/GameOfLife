@@ -136,7 +136,7 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 	extraBackColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1 + *offset,len(currentWorld))
 	currentSlice = append(currentSlice,currentWorld[extraBackColumnIndex])
 	for i := 0;i < columnsPerChannel;i++{
-		currentSlice = append(currentSlice,currentWorld[sliceNum * columnsPerChannel + i + *offset])
+		currentSlice = append(currentSlice,currentWorld[boundNumber(sliceNum * columnsPerChannel + i + *offset,len(currentWorld))])
 	}
 	//Adding extra column to this thread if the world doesn't split into each thread without remainders
 	if *remainderThreads > 0 {
