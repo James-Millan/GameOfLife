@@ -54,11 +54,11 @@ func getNumSurroundingCells(x int, y int, world [][]byte) int {
 	var succY = y + 1
 	var prevX = x - 1
 	var prevY = y - 1
-	succX = boundNumber(succX, len(world))
-	succY = boundNumber(succY, len(world[0]))
-	prevX = boundNumber(prevX, len(world))
-	prevY = boundNumber(prevY, len(world[0]))
-	if world[prevX][y] == ALIVE {
+	succX = boundNumber(succX,len(world))
+	succY = boundNumber(succY,len(world[0]))
+	prevX = boundNumber(prevX,len(world))
+	prevY = boundNumber(prevY,len(world[0]))
+	if world[prevX][y] == ALIVE	{
 		counter++
 	}
 	if world[prevX][prevY] == ALIVE {
