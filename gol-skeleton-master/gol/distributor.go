@@ -107,16 +107,29 @@ func distributor(p Params, c distributorChannels) {
 				fmt.Println("p")
 				for  {
 					unPause :=  <-c.keyPresses
-					if unPause == 'p'	{
+					done := false
+					switch unPause	{
+					case 'p':
+						done = true
+						break
+					case 's':
+						go writeFile(p, c, currentWorld, turnCounter)
+					case 'q':
+						go writeFile(p, c, currentWorld, turnCounter)
+						done = true
+						turn = p.Turns
+					}
+					if done	{
 						break
 					}
 				}
 			case 's':
 				fmt.Println("s")
-				writeFile(p, c, currentWorld, turnCounter)
+				go writeFile(p, c, currentWorld, turnCounter)
 			case 'q':
 				fmt.Println("q")
-				writeAndQuit(p, c, currentWorld, turnCounter)
+				go writeFile(p, c, currentWorld, turnCounter)
+				turn = p.Turns
 			}
 		default:
 		}
@@ -264,7 +277,7 @@ func boundNumber(num int,worldLen int) int{
 }
 
 func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int)	{
-	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.Turns)
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(turns)
 	c.ioCommand <- ioOutput
 	c.ioFilename <- outFile
 
@@ -290,7 +303,4 @@ func writeAndQuit(p Params, c distributorChannels, currentWorld [][]byte, turns 
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 	c.events <- StateChange{turns, Quitting}
-
-	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	close(c.events)
 }
