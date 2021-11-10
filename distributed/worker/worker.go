@@ -23,6 +23,7 @@ func main() {
 type WorkerOperations struct{}
 
 func (w *WorkerOperations) ProcessSlice(req stubs.Request, resp *stubs.Response) (err error) {
+	fmt.Println("Recieved")
 	currentSlice := req.CurrentWorld
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice) - 2)

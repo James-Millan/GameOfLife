@@ -20,20 +20,23 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	}
 
 	currentWorld := req.CurrentWorld
-	columnsPerWorker := len(currentWorld) / len(workers)
-	for turn := 0;turn < req.Turns;turn++{
+	turns := req.Turns
+	columnsPerChannel := len(currentWorld) / len(workers)
+	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
-		remainders := len(currentWorld) / len(workers)
+		//Splitting up world and distributing to channels
+		remainders := len(currentWorld) % len(workers)
 		offset := 0
-		for sliceNum := 0;sliceNum < len(workers);sliceNum++{
+		for sliceNum := 0; sliceNum < len(workers); sliceNum++{
 			go callWorker(clientChannels[sliceNum],workers[sliceNum])
-			currentSlice := sliceWorld(sliceNum,columnsPerWorker,currentWorld,&remainders,&offset)
+			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainders,&offset)
 			clientChannels[sliceNum] <- currentSlice
 		}
+		//Reconstructing image from worker channels
 		for i := range clientChannels{
 			nextSlice := <- clientChannels[i]
 			for j := range nextSlice{
-				nextWorld = append(nextWorld,nextSlice[j])
+				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
 		if req.Turns > 0{
