@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"os"
 	"uk.ac.bris.cs/gameoflife/stubs"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 var workers []string
@@ -44,6 +45,20 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		}
 	}
 	resp.NextWorld = currentWorld
+
+	//calculate the alive cells
+	aliveCells := make([]util.Cell, 0, len(currentWorld)*len(currentWorld[0]))
+	for i, _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF {
+				newCell := util.Cell{X: j, Y: i}
+				aliveCells = append(aliveCells, newCell)
+			}
+		}
+	}
+
+	resp.AliveCells = aliveCells
+
 	return
 }
 

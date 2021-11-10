@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
-	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -52,23 +51,14 @@ func distributor(p Params, c distributorChannels) {
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
 
-	currentWorld = resp.NextWorld
+	//currentWorld = resp.NextWorld
 
-	//calculate the alive cells
-	aliveCells := make([]util.Cell, 0, p.ImageWidth*p.ImageHeight)
-	for i, _ := range currentWorld {
-		for j, _ := range currentWorld[i] {
-			if currentWorld[i][j] == 0xFF {
-				newCell := util.Cell{X: j, Y: i}
-				aliveCells = append(aliveCells, newCell)
-			}
-		}
-	}
+
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
-		Alive:          aliveCells}
+		Alive:          resp.AliveCells}
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
