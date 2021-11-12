@@ -36,14 +36,14 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
-	columnsPerChannel := len(currentWorld) / len(workers)
+	columnsPerChannel := len(currentWorld) / len(workerClients)
 	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
 		//Splitting up world and distributing to channels
-		remainders := len(currentWorld) % len(workers)
+		remainders := len(currentWorld) % len(workerClients)
 		offset := 0
-		for sliceNum := 0; sliceNum < len(workers); sliceNum++ {
-			go callWorker(clientChannels[sliceNum], workers[sliceNum])
+		for sliceNum := 0; sliceNum < len(workerClients); sliceNum++ {
+			go callWorker(clientChannels[sliceNum], workerClients[sliceNum])
 			currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainders, &offset)
 			clientChannels[sliceNum] <- currentSlice
 		}
