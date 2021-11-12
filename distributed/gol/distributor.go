@@ -45,7 +45,7 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
 
-	client, err := rpc.Dial("tcp", "18.204.213.69")
+	client, err := rpc.Dial("tcp", "18.204.213.69:8030")
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
