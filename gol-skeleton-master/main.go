@@ -3,7 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"os"
 	"runtime"
+	"runtime/trace"
 
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/sdl"
@@ -12,6 +15,19 @@ import (
 // main is the function called when starting Game of Life with 'go run .'
 func main() {
 	runtime.LockOSThread()
+	f, err := os.Create("trace.out")
+	if err != nil	{
+		log.Fatalf("failed to create output file: %v", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Fatalf("failed to close trace file: %v", err)
+		}
+	}()
+	if err := trace.Start(f); err != nil	{
+		log.Fatalf("failed to start trace: %v", err)
+	}
+	defer trace.Stop()
 	var params gol.Params
 
 	flag.IntVar(
