@@ -5,20 +5,34 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"time"
+
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
 var workers []string
+var workerClients []*rpc.Client
 
 type BrokerOperations struct{}
 
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
-	fmt.Println("broker received")
 	clientChannels := []chan [][]uint8{}
-	for range workers{
-		clientChannels = append(clientChannels,make(chan [][]byte))
+	//Creating channels and connections to workers nodes
+	for i := range workers {
+		clientChannels = append(clientChannels, make(chan [][]byte))
+		newClient, err := rpc.Dial("tcp", workers[i])
+		if err != nil {
+			fmt.Println("Broker dialing error on ", workers[i], " - ", err.Error())
+		} else {
+			fmt.Println("Broker connected to worker on ", workers[i])
+			workerClients = append(workerClients, newClient)
+		}
+		defer newClient.Close()
 	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
@@ -28,19 +42,19 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		//Splitting up world and distributing to channels
 		remainders := len(currentWorld) % len(workers)
 		offset := 0
-		for sliceNum := 0; sliceNum < len(workers); sliceNum++{
-			go callWorker(clientChannels[sliceNum],workers[sliceNum])
-			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainders,&offset)
+		for sliceNum := 0; sliceNum < len(workers); sliceNum++ {
+			go callWorker(clientChannels[sliceNum], workers[sliceNum])
+			currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainders, &offset)
 			clientChannels[sliceNum] <- currentSlice
 		}
 		//Reconstructing image from worker channels
-		for i := range clientChannels{
-			nextSlice := <- clientChannels[i]
-			for j := range nextSlice{
+		for i := range clientChannels {
+			nextSlice := <-clientChannels[i]
+			for j := range nextSlice {
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
-		if req.Turns > 0{
+		if req.Turns > 0 {
 			currentWorld = nextWorld
 		}
 	}
@@ -62,45 +76,40 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	return
 }
 
-func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remainderThreads *int,offset *int) [][]uint8{
+func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, remainderThreads *int, offset *int) [][]uint8 {
 	currentSlice := [][]uint8{}
 	//Adding extra column to back of slice to avoid lines of cells that aren't processed
-	extraBackColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1 + *offset,len(currentWorld))
-	currentSlice = append(currentSlice,currentWorld[extraBackColumnIndex])
-	for i := 0;i < columnsPerChannel;i++{
-		currentSlice = append(currentSlice,currentWorld[boundNumber(sliceNum * columnsPerChannel + i + *offset,len(currentWorld))])
+	extraBackColumnIndex := boundNumber(sliceNum*columnsPerChannel-1+*offset, len(currentWorld))
+	currentSlice = append(currentSlice, currentWorld[extraBackColumnIndex])
+	for i := 0; i < columnsPerChannel; i++ {
+		currentSlice = append(currentSlice, currentWorld[boundNumber(sliceNum*columnsPerChannel+i+*offset, len(currentWorld))])
 	}
 	//Adding extra column to this thread if the world doesn't split into each thread without remainders
 	if *remainderThreads > 0 {
 		*remainderThreads -= 1
 		currentSlice = append(currentSlice,
-			currentWorld[boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))])
+			currentWorld[boundNumber(sliceNum*columnsPerChannel+columnsPerChannel+*offset, len(currentWorld))])
 		*offset += 1
 	}
 	//Adding extra column to front of slice to avoid lines of cells that aren't processed
-	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
-	currentSlice = append(currentSlice,currentWorld[extraFrontColumnIndex])
+	extraFrontColumnIndex := boundNumber(sliceNum*columnsPerChannel+columnsPerChannel+*offset, len(currentWorld))
+	currentSlice = append(currentSlice, currentWorld[extraFrontColumnIndex])
 	return currentSlice
 }
 
-func callWorker(channel chan [][]uint8,workerIp string){
-	client, err := rpc.Dial("tcp", workerIp)
-	if err != nil {
-		fmt.Println("Broker dialing error on ",workerIp," - ", err.Error())
-	}
-	defer client.Close()
-	req := stubs.Request{CurrentWorld: <- channel}
+func callWorker(channel chan [][]uint8, workerClient *rpc.Client) {
+	req := stubs.Request{CurrentWorld: <-channel}
 	resp := new(stubs.Response)
-	client.Call(stubs.ProcessSlice, req, resp)
+	workerClient.Call(stubs.ProcessSlice, req, resp)
 	channel <- resp.NextWorld
 }
 
-func boundNumber(num int,worldLen int) int{
-	if(num < 0){
+func boundNumber(num int, worldLen int) int {
+	if num < 0 {
 		return num + worldLen
-	}else if(num > worldLen - 1){
+	} else if num > worldLen-1 {
 		return num - worldLen
-	}else{
+	} else {
 		return num
 	}
 }
@@ -122,7 +131,7 @@ func main() {
 		}
 		defer listener.Close()
 		rpc.Accept(listener)
-	}else{
+	} else {
 		fmt.Println("Please give IP for workers as arguments")
 	}
 }
