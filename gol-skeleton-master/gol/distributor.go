@@ -113,9 +113,9 @@ func distributor(p Params, c distributorChannels) {
 						done = true
 						break
 					case 's':
-						go writeFile(p, c, currentWorld, turnCounter)
+						writeFile(p, c, currentWorld, turnCounter)
 					case 'q':
-						go writeFile(p, c, currentWorld, turnCounter)
+						writeFile(p, c, currentWorld, turnCounter)
 						done = true
 						turn = p.Turns
 					}
@@ -125,10 +125,10 @@ func distributor(p Params, c distributorChannels) {
 				}
 			case 's':
 				fmt.Println("s")
-				go writeFile(p, c, currentWorld, turnCounter)
+				writeFile(p, c, currentWorld, turnCounter)
 			case 'q':
 				fmt.Println("q")
-				go writeFile(p, c, currentWorld, turnCounter)
+				writeFile(p, c, currentWorld, turnCounter)
 				turn = p.Turns
 			}
 		default:
