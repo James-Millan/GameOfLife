@@ -25,6 +25,9 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
+	//brokerIp := flag.String("broker", "127.0.0.1:8030", "IP address of broker")
+	//flag.Parse()
+
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
@@ -42,18 +45,16 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
 
-	client, err := rpc.Dial("tcp", "127.0.0.1:8030")
+	client, err := rpc.Dial("tcp", "18.204.213.69")
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
-	req := stubs.Request{CurrentWorld: currentWorld,Turns: p.Turns}
+	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
 
 	//currentWorld = resp.NextWorld
-
-
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
