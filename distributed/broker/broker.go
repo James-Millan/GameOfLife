@@ -54,6 +54,12 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
+		/*select {
+		case <-ticker.C:
+			cells := getAliveCellsCount(currentWorld)
+			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
+		default:
+		}*/
 		if req.Turns > 0 {
 			currentWorld = nextWorld
 		}
@@ -95,6 +101,19 @@ func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, rema
 	extraFrontColumnIndex := boundNumber(sliceNum*columnsPerChannel+columnsPerChannel+*offset, len(currentWorld))
 	currentSlice = append(currentSlice, currentWorld[extraFrontColumnIndex])
 	return currentSlice
+}
+
+//calculates the number of alive cells given the current world
+func getAliveCellsCount(currentWorld [][]byte) int {
+	counter := 0
+	for i, _ := range currentWorld {
+		for j, _ := range currentWorld[i] {
+			if currentWorld[i][j] == 0xFF {
+				counter++
+			}
+		}
+	}
+	return counter
 }
 
 func callWorker(channel chan [][]uint8, workerClient *rpc.Client) {

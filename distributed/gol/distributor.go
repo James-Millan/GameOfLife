@@ -60,6 +60,7 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive:          resp.AliveCells}
+	writeFile(p, c, resp.NextWorld, turns)
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
@@ -68,4 +69,26 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int) {
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(turns)
+	c.ioCommand <- ioOutput
+	c.ioFilename <- outFile
+
+	//write file bit by bit.
+	for i := range currentWorld {
+		for j := range currentWorld[i] {
+			c.ioOutput <- currentWorld[i][j]
+		}
+	}
+	// Make sure that the Io has finished any output before exiting.
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+
+	c.events <- ImageOutputComplete{
+		CompletedTurns: turns,
+		Filename:       outFile,
+	}
+
 }
