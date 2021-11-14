@@ -12,23 +12,24 @@ import (
 )
 
 var workers []string
-var workerClients []*rpc.Client
 
 type BrokerOperations struct{}
 
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
 	clientChannels := []chan [][]uint8{}
+	workerClients := []*rpc.Client{}
 	//Creating channels and connections to workers nodes
 	for i := range workers {
-		clientChannels = append(clientChannels, make(chan [][]byte))
+		fmt.Println(workers[i])
 		newClient, err := rpc.Dial("tcp", workers[i])
 		if err != nil {
 			fmt.Println("Broker dialing error on ", workers[i], " - ", err.Error())
 		} else {
 			fmt.Println("Broker connected to worker on ", workers[i])
 			workerClients = append(workerClients, newClient)
+			clientChannels = append(clientChannels, make(chan [][]byte))
 		}
-		defer newClient.Close()
+		//defer newClient.Close()
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -144,7 +145,7 @@ func main() {
 	workers = os.Args[1:]
 	if len(workers) > 0 {
 		rpc.Register(&BrokerOperations{})
-		listener, err := net.Listen("tcp", ":8030")
+		listener, err := net.Listen("tcp", ":8040")
 		if err != nil {
 			fmt.Println("Broker listening error: ", err.Error())
 		}

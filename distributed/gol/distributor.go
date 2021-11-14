@@ -17,8 +17,14 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
+//USE THESE INSTEAD OF HARDCODED VALUES AFTER TESTING
+var BrokerIp string
+var MyIp string
+var Port string
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+	fmt.Println(BrokerIp)
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
 	for i := 0; i < p.ImageWidth; i++ {
@@ -45,7 +51,7 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
 
-	client, err := rpc.Dial("tcp", "18.204.213.69:8030")
+	client, err := rpc.Dial("tcp", "localhost:8040")
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}

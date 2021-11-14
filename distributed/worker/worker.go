@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	port := flag.String("port","8030","Port the worker will listen on")
+	port := flag.String("port","8050","Port the worker will listen on")
 	flag.Parse()
 	rpc.Register(&WorkerOperations{})
 	listener, err := net.Listen("tcp", ":"+*port)
@@ -24,6 +24,7 @@ type WorkerOperations struct{}
 
 func (w *WorkerOperations) ProcessSlice(req stubs.Request, resp *stubs.Response) (err error) {
 	fmt.Println("Recieved")
+
 	currentSlice := req.CurrentWorld
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice) - 2)

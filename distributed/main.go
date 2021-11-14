@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
-
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/sdl"
 )
@@ -13,7 +12,21 @@ import (
 func main() {
 	runtime.LockOSThread()
 	var params gol.Params
-
+	flag.StringVar(
+		&gol.BrokerIp,
+		"broker",
+		"localhost:8040",
+		"Ip address of broker")
+	flag.StringVar(
+		&gol.MyIp,
+		"myIp",
+		"localhost",
+		"Ip address of this machine (excluding port)")
+	flag.StringVar(
+		&gol.Port,
+		"port",
+		"8030",
+		"Port will listen on")
 	flag.IntVar(
 		&params.Threads,
 		"t",
