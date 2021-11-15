@@ -9,8 +9,18 @@ import (
 )
 
 func main() {
-	port := flag.String("port","8050","Port the worker will listen on")
+	myIp := flag.String("ip","localhost","Worker's ip")
+	port := flag.String("port","8050","Port worker will listen on")
+	brokerIp := flag.String("brokerIp","localhost:8040","Address to connect to broker")
 	flag.Parse()
+	subscriber, serr := rpc.Dial("tcp",*brokerIp)
+	if serr != nil {
+		fmt.Println("Worker on "+*myIp+":"+*port+" failed to connect to broker on "+*brokerIp+" - "+serr.Error())
+	}
+	subRequest := stubs.SubscriptionRequest{IP: *myIp+":"+*port}
+	subResp := new(stubs.GenericResponse)
+	subscriber.Call(stubs.SubscribeWorker,subRequest,subResp)
+	subscriber.Close()
 	rpc.Register(&WorkerOperations{})
 	listener, err := net.Listen("tcp", ":"+*port)
 	if err != nil {

@@ -12,6 +12,14 @@ type SubscriptionRequest struct {
 	IP string
 }
 
+type KeyPressRequest struct{
+	key string
+}
+
+type KeyPressResponse struct{
+	World [][]uint8
+}
+
 type AliveCellsRequest struct{
 	Cells int
 	TurnsCompleted int

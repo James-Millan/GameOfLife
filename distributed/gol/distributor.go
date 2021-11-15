@@ -109,8 +109,9 @@ func aliveCellsListen(listener net.Listener){
 var eventsChannel chan <- Event
 
 func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericResponse) (err error){
-	eventsChannel <- TurnComplete{CompletedTurns: req.TurnsCompleted}
+
 	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
+	eventsChannel <- TurnComplete{CompletedTurns: req.TurnsCompleted}
 	return
 }
 

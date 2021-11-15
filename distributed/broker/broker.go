@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"os"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
@@ -162,16 +161,11 @@ func boundNumber(num int, worldLen int) int {
 }*/
 
 func main() {
-	workers = os.Args[1:]
-	if len(workers) > 0 {
-		rpc.Register(&BrokerOperations{})
-		listener, err := net.Listen("tcp", ":8040")
-		if err != nil {
-			fmt.Println("Broker listening error: ", err.Error())
-		}
-		defer listener.Close()
-		rpc.Accept(listener)
-	} else {
-		fmt.Println("Please give IP for workers as arguments")
+	rpc.Register(&BrokerOperations{})
+	listener, err := net.Listen("tcp", ":8040")
+	if err != nil {
+		fmt.Println("Broker listening error: ", err.Error())
 	}
+	defer listener.Close()
+	rpc.Accept(listener)
 }
