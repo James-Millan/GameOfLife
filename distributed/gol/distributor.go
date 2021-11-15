@@ -1,8 +1,11 @@
 package gol
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/rpc"
+	"os"
 	"strconv"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
@@ -17,14 +20,25 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-//USE THESE INSTEAD OF HARDCODED VALUES AFTER TESTING
-var BrokerIp string
-var MyIp string
-var Port string
+type ControllerOperations struct {}
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-	fmt.Println(BrokerIp)
+	eventsChannel = c.events
+	//Reading values from config
+	file, rerr := os.Open("gol/config")
+	if rerr != nil {
+		fmt.Println("Error reading config file: "+rerr.Error())
+	}
+	reader := bufio.NewScanner(file)
+	reader.Scan()
+	myIp := reader.Text()
+	reader.Scan()
+	myPort := reader.Text()
+	reader.Scan()
+	brokerIp := reader.Text()
+	file.Close()
+
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
 	for i := 0; i < p.ImageWidth; i++ {
@@ -51,15 +65,26 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
 
-	client, err := rpc.Dial("tcp", "localhost:8040")
+	client, err := rpc.Dial("tcp", string(brokerIp))
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
+
+	rpc.Register(&ControllerOperations{})
+	aliveListener,aerr := net.Listen("tcp",":"+myPort)
+	if aerr != nil{
+		fmt.Println("Distributor listening error: "+aerr.Error())
+	}
+	go aliveCellsListen(aliveListener)
+	subRequest := stubs.SubscriptionRequest{IP: myIp+":"+myPort}
+	subResp := new(stubs.GenericResponse)
+	client.Call(stubs.SubscribeController,subRequest,subResp)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
 
+	aliveListener.Close()
 	//currentWorld = resp.NextWorld
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
@@ -75,6 +100,18 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+func aliveCellsListen(listener net.Listener){
+	rpc.Accept(listener)
+}
+
+var eventsChannel chan <- Event
+
+func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericResponse) (err error){
+	eventsChannel <- TurnComplete{CompletedTurns: req.TurnsCompleted}
+	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
+	return
 }
 
 func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int) {

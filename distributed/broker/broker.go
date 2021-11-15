@@ -12,8 +12,25 @@ import (
 )
 
 var workers []string
+var controller *rpc.Client
 
 type BrokerOperations struct{}
+
+func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *stubs.GenericResponse) (err error){
+	workers = append(workers,req.IP)
+	fmt.Println("Received subscription request from worker on "+req.IP)
+	return
+}
+
+func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericResponse) (err error){
+	controller,err = rpc.Dial("tcp", req.IP)
+	if err != nil{
+		fmt.Println("Failed to connect to controller on "+req.IP+" - "+err.Error())
+	}else {
+		fmt.Println("Connected to controller on "+req.IP)
+	}
+	return
+}
 
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
 	clientChannels := []chan [][]uint8{}
@@ -55,12 +72,15 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
-		/*select {
+		select {
 		case <-ticker.C:
 			cells := getAliveCellsCount(currentWorld)
-			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
+			cellsReq := stubs.AliveCellsRequest{Cells: cells,TurnsCompleted: turn}
+			cellsResp := new(stubs.GenericResponse)
+			controller.Call(stubs.ReceiveAliveCells, cellsReq, cellsResp)
+			fmt.Println("sent")
 		default:
-		}*/
+		}
 		if req.Turns > 0 {
 			currentWorld = nextWorld
 		}
