@@ -18,6 +18,7 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+	keyPresses <-chan rune
 }
 
 type ControllerOperations struct {}
@@ -80,6 +81,7 @@ func distributor(p Params, c distributorChannels) {
 	subRequest := stubs.SubscriptionRequest{IP: myIp+":"+myPort}
 	subResp := new(stubs.GenericResponse)
 	client.Call(stubs.SubscribeController,subRequest,subResp)
+	go readKeys(c)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
@@ -102,6 +104,24 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
+func readKeys(c distributorChannels){
+	select {
+	case command := <-c.keyPresses:
+		switch command	{
+		case 'p':
+			fmt.Println("p")
+		case 's':
+			fmt.Println("s")
+			//writeFile(p, c, currentWorld, turnCounter)
+		case 'q':
+			fmt.Println("q")
+			//writeFile(p, c, currentWorld, turnCounter)
+			//turn = p.Turns
+		}
+	default:
+	}
+}
+
 func aliveCellsListen(listener net.Listener){
 	rpc.Accept(listener)
 }
@@ -109,9 +129,7 @@ func aliveCellsListen(listener net.Listener){
 var eventsChannel chan <- Event
 
 func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericResponse) (err error){
-
 	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
-	eventsChannel <- TurnComplete{CompletedTurns: req.TurnsCompleted}
 	return
 }
 
