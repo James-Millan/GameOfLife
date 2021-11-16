@@ -38,8 +38,8 @@ func TestAlive(t *testing.T) {
 	}()
 
 	i := 0
-	for event := range events {
-		switch e := event.(type) {
+	for event := range events{
+		switch e := event.(type){
 		case gol.AliveCellsCount:
 			var expected int
 			if e.CompletedTurns <= 10000 {

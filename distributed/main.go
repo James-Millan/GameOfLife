@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
-
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/sdl"
 )
@@ -13,7 +12,6 @@ import (
 func main() {
 	runtime.LockOSThread()
 	var params gol.Params
-
 	flag.IntVar(
 		&params.Threads,
 		"t",

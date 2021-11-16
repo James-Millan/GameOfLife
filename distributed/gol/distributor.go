@@ -1,8 +1,11 @@
 package gol
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/rpc"
+	"os"
 	"strconv"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
@@ -15,10 +18,20 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+	keyPresses <-chan rune
 }
+
+type ControllerOperations struct {}
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+	eventsChannel = c.events
+
+	var brokerIp string
+	var myIp string
+	var myPort string
+	readConfigFile(&brokerIp,&myPort,&myIp)
+
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
 	for i := 0; i < p.ImageWidth; i++ {
@@ -45,21 +58,34 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Execute all turns of the Game of Life.
 	turns := p.Turns
 
-	client, err := rpc.Dial("tcp", "18.204.213.69:8030")
+	client, err := rpc.Dial("tcp", string(brokerIp))
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
+
+	rpc.Register(&ControllerOperations{})
+	aliveListener,aerr := net.Listen("tcp",":"+myPort)
+	if aerr != nil{
+		fmt.Println("Distributor listening error: "+aerr.Error())
+	}
+	go aliveCellsListen(aliveListener)
+	subRequest := stubs.SubscriptionRequest{IP: myIp+":"+myPort}
+	subResp := new(stubs.GenericMessage)
+	client.Call(stubs.SubscribeController,subRequest,subResp)
+	go readKeys(c,client,p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
 
+	aliveListener.Close()
 	//currentWorld = resp.NextWorld
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive:          resp.AliveCells}
+	writeFile(p, c, resp.NextWorld, turns)
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
@@ -68,4 +94,94 @@ func distributor(p Params, c distributorChannels) {
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+func readConfigFile(brokerIp *string,myPort *string,myIp *string){
+	file, rerr := os.Open("gol/config")
+	if rerr != nil {
+		fmt.Println("Error reading config file: "+rerr.Error())
+	}
+	reader := bufio.NewScanner(file)
+	reader.Scan()
+	*myIp = reader.Text()
+	reader.Scan()
+	*myPort = reader.Text()
+	reader.Scan()
+	*brokerIp = reader.Text()
+	file.Close()
+}
+
+func readKeys(c distributorChannels,broker *rpc.Client,p Params){
+	for {
+		select {
+		case command := <-c.keyPresses:
+			switch command {
+			case 's':
+				fmt.Println("s")
+				getPGMFromServer(broker, p, c)
+			case 'k':
+				fmt.Println("s")
+				getPGMFromServer(broker, p, c)
+				req := new(stubs.GenericMessage)
+				resp := new(stubs.GenericMessage)
+				broker.Call(stubs.KillBroker, req, resp)
+				broker.Close()
+			case 'q':
+				fmt.Println("q")
+				broker.Close()
+				break
+			case 'p':
+				fmt.Println("p")
+				req := new(stubs.GenericMessage)
+				resp := new(stubs.PauseResponse)
+				broker.Call(stubs.TogglePause,req,resp)
+				if resp.Resuming {
+					fmt.Println("Continuing")
+				}else{
+					fmt.Println(resp.Turn)
+				}
+			}
+		default:
+		}
+	}
+}
+
+func getPGMFromServer(broker *rpc.Client,p Params,c distributorChannels){
+	req := new(stubs.GenericMessage)
+	resp := new(stubs.PGMResponse)
+	broker.Call(stubs.KeyPressPGM,req,resp)
+	writeFile(p,c,resp.World,resp.Turns)
+}
+
+func aliveCellsListen(listener net.Listener){
+	rpc.Accept(listener)
+}
+
+var eventsChannel chan <- Event
+
+func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericMessage) (err error){
+	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
+	return
+}
+
+func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int) {
+	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(turns)
+	c.ioCommand <- ioOutput
+	c.ioFilename <- outFile
+
+	//write file bit by bit.
+	for i := range currentWorld {
+		for j := range currentWorld[i] {
+			c.ioOutput <- currentWorld[i][j]
+		}
+	}
+	// Make sure that the Io has finished any output before exiting.
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+
+	c.events <- ImageOutputComplete{
+		CompletedTurns: turns,
+		Filename:       outFile,
+	}
+
 }
