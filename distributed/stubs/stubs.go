@@ -7,17 +7,18 @@ var BrokerRequest = "BrokerOperations.BrokerRequest"
 var SubscribeWorker = "BrokerOperations.SubscribeWorker"
 var SubscribeController = "BrokerOperations.SubscribeController"
 var ReceiveAliveCells = "ControllerOperations.ReceiveAliveCells"
+var KeyPressPGM = "BrokerOperations.KeyPressPGM"
+var KillBroker = "BrokerOperations.Kill"
+var KillWorker = "WorkerOperations.Kill"
+var TogglePause = "BrokerOperations.TogglePause"
 
 type SubscriptionRequest struct {
 	IP string
 }
 
-type KeyPressRequest struct{
-	key string
-}
-
-type KeyPressResponse struct{
+type PGMResponse struct{
 	World [][]uint8
+	Turns int
 }
 
 type AliveCellsRequest struct{
@@ -25,8 +26,13 @@ type AliveCellsRequest struct{
 	TurnsCompleted int
 }
 
-type GenericResponse struct {
+type GenericMessage struct {
 	Message string
+}
+
+type PauseResponse struct{
+	Turn int
+	Resuming bool
 }
 
 type Response struct {

@@ -11,17 +11,52 @@ import (
 )
 
 var workers []string
+var workerClients []*rpc.Client
 var controller *rpc.Client
+var requestingPGM bool
+var PGMChannel chan [][]uint8
+var listener net.Listener
+var paused bool
+var pauseChannel chan bool
+var turnChannel chan int
 
 type BrokerOperations struct{}
 
-func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *stubs.GenericResponse) (err error){
+func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
 	workers = append(workers,req.IP)
 	fmt.Println("Received subscription request from worker on "+req.IP)
 	return
 }
 
-func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericResponse) (err error){
+func (b *BrokerOperations) TogglePause(req stubs.GenericMessage, resp *stubs.PauseResponse) (err error){
+	paused = !paused
+	if(paused){
+		resp.Resuming = false
+		resp.Turn = <-turnChannel
+	}else{
+		<-pauseChannel
+		resp.Resuming = true
+	}
+	return
+}
+
+func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
+	for i := range workerClients{
+		wReq := new(stubs.GenericMessage)
+		wResp := new(stubs.GenericMessage)
+		workerClients[i].Call(stubs.KillWorker,wReq,wResp)
+	}
+	listener.Close()
+	return
+}
+
+func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGMResponse) (err error){
+	requestingPGM = true
+	resp.World = <-PGMChannel
+	return
+}
+
+func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
 	controller,err = rpc.Dial("tcp", req.IP)
 	if err != nil{
 		fmt.Println("Failed to connect to controller on "+req.IP+" - "+err.Error())
@@ -33,7 +68,7 @@ func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, re
 
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
 	clientChannels := []chan [][]uint8{}
-	workerClients := []*rpc.Client{}
+	workerClients = []*rpc.Client{}
 	//Creating channels and connections to workers nodes
 	for i := range workers {
 		fmt.Println(workers[i])
@@ -49,7 +84,6 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
 
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
@@ -75,15 +109,24 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		case <-ticker.C:
 			cells := getAliveCellsCount(currentWorld)
 			cellsReq := stubs.AliveCellsRequest{Cells: cells,TurnsCompleted: turn}
-			cellsResp := new(stubs.GenericResponse)
+			cellsResp := new(stubs.GenericMessage)
 			controller.Call(stubs.ReceiveAliveCells, cellsReq, cellsResp)
 			fmt.Println("sent")
 		default:
+		}
+		if requestingPGM{
+			PGMChannel <- currentWorld
+			requestingPGM = false
+		}
+		if paused{
+			turnChannel<-turn
+			pauseChannel<-true
 		}
 		if req.Turns > 0 {
 			currentWorld = nextWorld
 		}
 	}
+	ticker.Stop()
 	resp.NextWorld = currentWorld
 
 	//calculate the alive cells
@@ -161,11 +204,16 @@ func boundNumber(num int, worldLen int) int {
 }*/
 
 func main() {
+	requestingPGM = false
+	paused = false
+	PGMChannel = make(chan [][]uint8,1)
+	pauseChannel = make(chan bool)
+	turnChannel = make(chan int)
 	rpc.Register(&BrokerOperations{})
-	listener, err := net.Listen("tcp", ":8040")
+	var err error
+	listener, err = net.Listen("tcp", ":8040")
 	if err != nil {
 		fmt.Println("Broker listening error: ", err.Error())
 	}
-	defer listener.Close()
 	rpc.Accept(listener)
 }

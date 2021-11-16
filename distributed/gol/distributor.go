@@ -26,19 +26,11 @@ type ControllerOperations struct {}
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	eventsChannel = c.events
-	//Reading values from config
-	file, rerr := os.Open("gol/config")
-	if rerr != nil {
-		fmt.Println("Error reading config file: "+rerr.Error())
-	}
-	reader := bufio.NewScanner(file)
-	reader.Scan()
-	myIp := reader.Text()
-	reader.Scan()
-	myPort := reader.Text()
-	reader.Scan()
-	brokerIp := reader.Text()
-	file.Close()
+
+	var brokerIp string
+	var myIp string
+	var myPort string
+	readConfigFile(&brokerIp,&myPort,&myIp)
 
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
@@ -79,9 +71,9 @@ func distributor(p Params, c distributorChannels) {
 	}
 	go aliveCellsListen(aliveListener)
 	subRequest := stubs.SubscriptionRequest{IP: myIp+":"+myPort}
-	subResp := new(stubs.GenericResponse)
+	subResp := new(stubs.GenericMessage)
 	client.Call(stubs.SubscribeController,subRequest,subResp)
-	go readKeys(c)
+	go readKeys(c,client,p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
@@ -104,22 +96,61 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func readKeys(c distributorChannels){
-	select {
-	case command := <-c.keyPresses:
-		switch command	{
-		case 'p':
-			fmt.Println("p")
-		case 's':
-			fmt.Println("s")
-			//writeFile(p, c, currentWorld, turnCounter)
-		case 'q':
-			fmt.Println("q")
-			//writeFile(p, c, currentWorld, turnCounter)
-			//turn = p.Turns
-		}
-	default:
+func readConfigFile(brokerIp *string,myPort *string,myIp *string){
+	file, rerr := os.Open("gol/config")
+	if rerr != nil {
+		fmt.Println("Error reading config file: "+rerr.Error())
 	}
+	reader := bufio.NewScanner(file)
+	reader.Scan()
+	*myIp = reader.Text()
+	reader.Scan()
+	*myPort = reader.Text()
+	reader.Scan()
+	*brokerIp = reader.Text()
+	file.Close()
+}
+
+func readKeys(c distributorChannels,broker *rpc.Client,p Params){
+	for {
+		select {
+		case command := <-c.keyPresses:
+			switch command {
+			case 's':
+				fmt.Println("s")
+				getPGMFromServer(broker, p, c)
+			case 'k':
+				fmt.Println("s")
+				getPGMFromServer(broker, p, c)
+				req := new(stubs.GenericMessage)
+				resp := new(stubs.GenericMessage)
+				broker.Call(stubs.KillBroker, req, resp)
+				broker.Close()
+			case 'q':
+				fmt.Println("q")
+				broker.Close()
+				break
+			case 'p':
+				fmt.Println("p")
+				req := new(stubs.GenericMessage)
+				resp := new(stubs.PauseResponse)
+				broker.Call(stubs.TogglePause,req,resp)
+				if resp.Resuming {
+					fmt.Println("Continuing")
+				}else{
+					fmt.Println(resp.Turn)
+				}
+			}
+		default:
+		}
+	}
+}
+
+func getPGMFromServer(broker *rpc.Client,p Params,c distributorChannels){
+	req := new(stubs.GenericMessage)
+	resp := new(stubs.PGMResponse)
+	broker.Call(stubs.KeyPressPGM,req,resp)
+	writeFile(p,c,resp.World,resp.Turns)
 }
 
 func aliveCellsListen(listener net.Listener){
@@ -128,7 +159,7 @@ func aliveCellsListen(listener net.Listener){
 
 var eventsChannel chan <- Event
 
-func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericResponse) (err error){
+func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericMessage) (err error){
 	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
 	return
 }

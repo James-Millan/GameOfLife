@@ -8,6 +8,8 @@ import (
 	"uk.ac.bris.cs/gameoflife/stubs"
 )
 
+var listener net.Listener
+
 func main() {
 	myIp := flag.String("ip","localhost","Worker's ip")
 	port := flag.String("port","8050","Port worker will listen on")
@@ -18,19 +20,24 @@ func main() {
 		fmt.Println("Worker on "+*myIp+":"+*port+" failed to connect to broker on "+*brokerIp+" - "+serr.Error())
 	}
 	subRequest := stubs.SubscriptionRequest{IP: *myIp+":"+*port}
-	subResp := new(stubs.GenericResponse)
+	subResp := new(stubs.GenericMessage)
 	subscriber.Call(stubs.SubscribeWorker,subRequest,subResp)
 	subscriber.Close()
 	rpc.Register(&WorkerOperations{})
-	listener, err := net.Listen("tcp", ":"+*port)
+	var err error
+	listener, err = net.Listen("tcp", ":"+*port)
 	if err != nil {
 		fmt.Println("Worker listening error: ", err.Error())
 	}
-	defer listener.Close()
 	rpc.Accept(listener)
 }
 
 type WorkerOperations struct{}
+
+func (w *WorkerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
+	listener.Close()
+	return
+}
 
 func (w *WorkerOperations) ProcessSlice(req stubs.Request, resp *stubs.Response) (err error) {
 	fmt.Println("Recieved")
