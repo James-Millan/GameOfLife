@@ -10,15 +10,17 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
+var listener net.Listener
 var workers []string
 var workerClients []*rpc.Client
 var controller *rpc.Client
 var requestingPGM bool
 var PGMChannel chan [][]uint8
-var listener net.Listener
 var paused bool
 var pauseChannel chan bool
 var turnChannel chan int
+var requestingShutdown bool
+var shutdownChannel chan bool
 
 type BrokerOperations struct{}
 
@@ -41,6 +43,8 @@ func (b *BrokerOperations) TogglePause(req stubs.GenericMessage, resp *stubs.Pau
 }
 
 func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
+	requestingShutdown = true
+	<- shutdownChannel
 	for i := range workerClients{
 		wReq := new(stubs.GenericMessage)
 		wResp := new(stubs.GenericMessage)
@@ -117,6 +121,10 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		if requestingPGM{
 			PGMChannel <- currentWorld
 			requestingPGM = false
+		}
+		if requestingShutdown{
+			shutdownChannel <- true
+			break
 		}
 		if paused{
 			turnChannel<-turn
@@ -205,9 +213,11 @@ func boundNumber(num int, worldLen int) int {
 
 func main() {
 	requestingPGM = false
+	requestingShutdown = false
 	paused = false
 	PGMChannel = make(chan [][]uint8,1)
 	pauseChannel = make(chan bool)
+	shutdownChannel = make(chan bool)
 	turnChannel = make(chan int)
 	rpc.Register(&BrokerOperations{})
 	var err error
