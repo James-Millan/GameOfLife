@@ -48,33 +48,8 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0;i < p.Threads;i++ {
 		workerChannels = append(workerChannels, make(chan [][]byte))
 	}
-
-	//TODO implement keypress logic.
-
 	// Execute all turns of the Game of Life.
 	turnCounter := 0
-
-
-	/*go func() {
-		for  {
-			select {
-			case command := <-c.keyPresses:
-				switch command	{
-				case 'p':
-					fmt.Println("p")
-				case 's':
-					fmt.Println("s")
-					writeFile(p, c, currentWorld, turnCounter)
-				case 'q':
-					fmt.Println("q")
-					writeAndQuit(p, c, currentWorld, turnCounter)
-				}
-			default:
-			}
-		}
-	}()
-
-	 */
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
@@ -147,7 +122,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	//calculate the alive cells
-	aliveCells := make([]util.Cell, 0, p.ImageWidth * p.ImageHeight)
+	aliveCells := make([]util.Cell	, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
 		for j, _ := range currentWorld[i] {
 			if currentWorld[i][j] == 0xFF	{
@@ -280,8 +255,6 @@ func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int
 	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(turns)
 	c.ioCommand <- ioOutput
 	c.ioFilename <- outFile
-
-	//write file bit by bit.
 	for i := range currentWorld	{
 		for j := range currentWorld[i]	{
 			c.ioOutput <- currentWorld[i][j]
@@ -290,17 +263,8 @@ func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
-
 	c.events <- ImageOutputComplete{
 		CompletedTurns: turns,
 		Filename: outFile,
 	}
-
-}
-
-func writeAndQuit(p Params, c distributorChannels, currentWorld [][]byte, turns int)	{
-	writeFile(p, c, currentWorld, turns)
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-	c.events <- StateChange{turns, Quitting}
 }

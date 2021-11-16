@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
-
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -127,3 +127,20 @@ func readAliveCells(path string, width, height int) []util.Cell {
 	}
 	return cells
 }
+
+func BenchmarkGol(b *testing.B) {
+	os.Stdout = nil
+	for threads := 1; threads <= 16; threads++	{
+		b.Run(fmt.Sprintf("%d_workers", threads), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				keyPresses := make(chan rune, 10)
+				events := make(chan gol.Event, 1000)
+				params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 16, ImageHeight: 16}
+				gol.Run(params, events, keyPresses)
+			}
+		})
+	}
+}
+
+
+

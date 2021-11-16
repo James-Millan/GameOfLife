@@ -87,3 +87,16 @@ func readAliveCounts(width, height int) map[int]int {
 	}
 	return alive
 }
+func BenchmarkGameOfLife(b *testing.B) {
+	keyPresses := make(chan rune, 10)
+	events := make(chan gol.Event, 1000)
+	for threads := 1; threads <= 16; threads++	{
+		b.Run(fmt.Sprintf("%d_workers", threads), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				println("ok")
+				params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 64, ImageHeight: 64}
+				gol.Run(params, events, keyPresses)
+			}
+		})
+	}
+}

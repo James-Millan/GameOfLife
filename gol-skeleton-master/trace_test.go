@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"runtime/trace"
 	"testing"
@@ -26,4 +27,17 @@ func TestTrace(t *testing.T) {
 	trace.Stop()
 	err = f.Close()
 	util.Check(err)
+}
+
+func BenchmarkGameOfLife(b *testing.B) {
+	keyPresses := make(chan rune, 10)
+	events := make(chan gol.Event, 1000)
+	for threads := 1; threads <= 16; threads++	{
+		b.Run(fmt.Sprintf("%d_workers", threads), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				params := gol.Params{Turns: 10000, Threads: threads, ImageWidth: 512, ImageHeight: 512}
+				gol.Run(params, events, keyPresses)
+			}
+		})
+	}
 }
