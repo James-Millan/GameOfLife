@@ -3,10 +3,10 @@ package gol
 import (
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
-
 type distributorChannels struct {
 	events     chan<- Event
 	ioCommand  chan<- ioCommand
@@ -16,7 +16,6 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 	keyPresses <-chan rune
 }
-
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	//Create a 2D slice to store the world
@@ -24,10 +23,11 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0; i < p.ImageWidth; i++ {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
-
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-
+	turnsDone := make(chan bool)
+	var worldMutex sync.Mutex
+	var turnMutex sync.Mutex
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
@@ -43,7 +43,6 @@ func distributor(p Params, c distributorChannels) {
 			currentWorld[j][k] = newPixel
 		}
 	}
-
 	workerChannels := []chan [][]byte{}
 	for i := 0;i < p.Threads;i++ {
 		workerChannels = append(workerChannels, make(chan [][]byte))
@@ -52,6 +51,30 @@ func distributor(p Params, c distributorChannels) {
 	turnCounter := 0
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
+
+	go func() {
+		//when all turns are done break out of for loop
+		done := false
+		for  {
+			select {
+			case <-ticker.C:
+				worldMutex.Lock()
+				turnMutex.Lock()
+				cells := getAliveCellsCount(currentWorld)
+				c.events <- AliveCellsCount{CellsCount: cells, CompletedTurns: turnCounter}
+				turnMutex.Unlock()
+				worldMutex.Unlock()
+
+			case <-turnsDone:
+				done = true
+				default:
+			}
+			if done	{
+				break
+			}
+		}
+	}()
+
 	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
 		//Splitting up world and distributing to channels
@@ -68,12 +91,6 @@ func distributor(p Params, c distributorChannels) {
 			for j := range nextSlice{
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
-		}
-		select {
-		case <-ticker.C:
-			cells := getAliveCellsCount(currentWorld)
-			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
-		default:
 		}
 		select {
 		case command := <-c.keyPresses:
@@ -109,6 +126,7 @@ func distributor(p Params, c distributorChannels) {
 		default:
 		}
 		//update current world.
+		worldMutex.Lock()
 		for i := range currentWorld	{
 			for j := range currentWorld[i]	{
 				if currentWorld[i][j] != nextWorld[i][j]	{
@@ -117,10 +135,14 @@ func distributor(p Params, c distributorChannels) {
 				currentWorld[i][j] = nextWorld[i][j]
 			}
 		}
+		worldMutex.Unlock()
+		turnMutex.Lock()
 		turnCounter ++
+		turnMutex.Unlock()
 		c.events <- TurnComplete{CompletedTurns: turnCounter}
 	}
 
+	turnsDone <- true
 	//calculate the alive cells
 	aliveCells := make([]util.Cell	, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
