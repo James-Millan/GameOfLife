@@ -127,48 +127,21 @@ func readAliveCells(path string, width, height int) []util.Cell {
 	}
 	return cells
 }
-/*
+
 func BenchmarkGol(b *testing.B) {
 	os.Stdout = nil
 	for threads := 1; threads <= 16; threads++	{
-		keyPresses := make(chan rune, 10)
-		events := make(chan gol.Event, 1000)
-		params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 16, ImageHeight: 16}
-		ioCommand := make(chan ioCommand)
-		ioIdle := make(chan bool)
-		ioFilename := make(chan string)
-		ioOutput := make(chan uint8)
-		ioInput := make(chan uint8)
-
-		ioChannels := ioChannels{
-			command:  ioCommand,
-			idle:     ioIdle,
-			filename: ioFilename,
-			output:   ioOutput,
-			input:    ioInput,
-		}
-		go startIo(p, ioChannels)
-
-		distributorChannels := distributorChannels{
-			events:     events,
-			ioCommand:  ioCommand,
-			ioIdle:     ioIdle,
-			ioFilename: ioFilename,
-			ioOutput:   ioOutput,
-			ioInput:    ioInput,
-			keyPresses: keyPresses,
-		}
-
 		b.Run(fmt.Sprintf("%d_workers", threads), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				distributor(params, distributorChannels)
+				keyPresses := make(chan rune, 10)
+				events := make(chan gol.Event, 1000)
+				params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 16, ImageHeight: 16}
+				gol.Run(params, events, keyPresses)
+				close(keyPresses)
 			}
 		})
-		close(keyPresses)
 	}
 }
-
- */
 
 
 
