@@ -1,7 +1,6 @@
 package gol
 
 import (
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -96,7 +95,6 @@ func distributor(p Params, c distributorChannels) {
 		case command := <-c.keyPresses:
 			switch command	{
 			case 'p':
-				fmt.Println("p")
 				for  {
 					unPause :=  <-c.keyPresses
 					done := false
@@ -105,9 +103,17 @@ func distributor(p Params, c distributorChannels) {
 						done = true
 						break
 					case 's':
+						worldMutex.Lock()
+						turnMutex.Lock()
 						writeFile(p, c, currentWorld, turnCounter)
+						turnMutex.Unlock()
+						worldMutex.Unlock()
 					case 'q':
+						worldMutex.Lock()
+						turnMutex.Lock()
 						writeFile(p, c, currentWorld, turnCounter)
+						turnMutex.Unlock()
+						worldMutex.Unlock()
 						done = true
 						turn = p.Turns
 					}
@@ -116,11 +122,17 @@ func distributor(p Params, c distributorChannels) {
 					}
 				}
 			case 's':
-				fmt.Println("s")
+				worldMutex.Lock()
+				turnMutex.Lock()
 				writeFile(p, c, currentWorld, turnCounter)
+				turnMutex.Unlock()
+				worldMutex.Unlock()
 			case 'q':
-				fmt.Println("q")
+				worldMutex.Lock()
+				turnMutex.Lock()
 				writeFile(p, c, currentWorld, turnCounter)
+				turnMutex.Unlock()
+				worldMutex.Unlock()
 				turn = p.Turns
 			}
 		default:
@@ -228,14 +240,10 @@ func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 	const ALIVE = 0xFF
 	var counter = 0
-	var succX = x + 1
-	var succY = y + 1
-	var prevX = x - 1
-	var prevY = y - 1
-	succX = boundNumber(succX,len(world))
-	succY = boundNumber(succY,len(world[0]))
-	prevX = boundNumber(prevX,len(world))
-	prevY = boundNumber(prevY,len(world[0]))
+	succX := boundNumber(x + 1,len(world))
+	succY := boundNumber(y + 1,len(world[0]))
+	prevX := boundNumber(x - 1,len(world))
+	prevY := boundNumber(y - 1,len(world[0]))
 	if world[prevX][y] == ALIVE	{
 		counter++
 	}
