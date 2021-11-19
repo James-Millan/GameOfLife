@@ -17,6 +17,11 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
+type sliceIndices struct{
+	Start int
+	End int
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	//Create a 2D slice to store the world
@@ -76,15 +81,27 @@ func distributor(p Params, c distributorChannels) {
 
 	 */
 	turns := p.Turns
-	columnsPerChannel := len(currentWorld) / p.Threads
+	splits := splitWorld(p.Threads,len(currentWorld) + 2)
+	/*for i := range splits{
+		splits[i].Start += 1
+		splits[i].End += 1
+	}*/
+	fmt.Println(splits)
+	//columnsPerChannel := len(currentWorld) / p.Threads
 	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
 		//Splitting up world and distributing to channels
-		remainderThreads := len(currentWorld) % p.Threads
-		offset := 0
+		/*remainderThreads := len(currentWorld) % p.Threads
+		offset := 0*/
+		wrappedCurrentWorld := [][]byte{}
+		wrappedCurrentWorld = append(wrappedCurrentWorld,currentWorld[len(currentWorld)-1])
+		wrappedCurrentWorld = append(wrappedCurrentWorld,currentWorld...)
+		wrappedCurrentWorld = append(wrappedCurrentWorld,currentWorld[0])
 		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
 			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
-			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
+			//currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
+			currentSplit := splits[sliceNum]
+			currentSlice := wrappedCurrentWorld[currentSplit.Start:currentSplit.End]
 			workerChannels[sliceNum] <- currentSlice
 		}
 		//Reconstructing image from worker channels
@@ -134,6 +151,7 @@ func distributor(p Params, c distributorChannels) {
 		default:
 		}
 		//update current world.
+		fmt.Println("C: ",len(currentWorld),"N: ",len(nextWorld))
 		for i := range currentWorld	{
 			for j := range currentWorld[i]	{
 				if currentWorld[i][j] != nextWorld[i][j]	{
@@ -166,6 +184,28 @@ func distributor(p Params, c distributorChannels) {
 	
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+func splitWorld(threads int,numOfColumns int) []sliceIndices{
+	columnsPerChannel := numOfColumns / threads
+	remainders := numOfColumns % threads
+	currentColumn := 1
+	indices := make([]sliceIndices,threads)
+	for i := 0; i < threads;i++{
+		currentIndices := sliceIndices{}
+		currentIndices.Start = currentColumn - 1
+		for j := 1;j < columnsPerChannel;j++{
+			currentColumn++
+		}
+		if remainders > 0{
+			remainders--
+			currentColumn++
+		}
+		currentIndices.End = currentColumn + 1
+		currentColumn++
+		indices[i] = currentIndices
+	}
+	return indices
 }
 
 //Helper function for splitting the world into slices
@@ -207,6 +247,7 @@ func getAliveCellsCount(currentWorld [][]byte) int	{
 func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
 	currentSlice := <- channel
 	//Making new slice to write changes to
+	fmt.Println("processing ",len(currentSlice))
 	nextSlice := make([][]byte, len(currentSlice) - 2)
 	for i := range nextSlice{
 		nextSlice[i] = make([]byte, len(currentSlice[0]))
