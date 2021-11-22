@@ -24,7 +24,9 @@ func distributor(p Params, c distributorChannels) {
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	turnsDone := make(chan bool)
+	closeTicker := make(chan bool)
+	keyQuit := make(chan bool)
+	closeKey := make(chan bool)
 	var worldMutex sync.Mutex
 	var turnMutex sync.Mutex
 	//TODO read in initial state of GOL using io.go
@@ -51,6 +53,7 @@ func distributor(p Params, c distributorChannels) {
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 
+	//ticker goroutine
 	go func() {
 		//when all turns are done break out of for loop
 		done := false
@@ -64,97 +67,116 @@ func distributor(p Params, c distributorChannels) {
 				turnMutex.Unlock()
 				worldMutex.Unlock()
 
-			case <-turnsDone:
+			case <-closeTicker:
 				done = true
-				default:
+			default:
 			}
 			if done	{
 				break
 			}
 		}
 	}()
+	//keyPresses goroutine
+	go func()	{
+		terminate := false
+		for  {
+			select {
+			case command := <-c.keyPresses:
+				switch command	{
+				case 'p':
+					for  {
+						unPause :=  <-c.keyPresses
+						done := false
+						switch unPause	{
+						case 'p':
+							done = true
+							break
+						case 's':
+							worldMutex.Lock()
+							turnMutex.Lock()
+							writeFile(p, c, currentWorld, turnCounter)
+							turnMutex.Unlock()
+							worldMutex.Unlock()
+						case 'q':
+							worldMutex.Lock()
+							turnMutex.Lock()
+							writeFile(p, c, currentWorld, turnCounter)
+							turnMutex.Unlock()
+							worldMutex.Unlock()
+							done = true
+							keyQuit <- true
+						}
+						if done	{
+							break
+						}
+					}
+				case 's':
+					worldMutex.Lock()
+					turnMutex.Lock()
+					writeFile(p, c, currentWorld, turnCounter)
+					turnMutex.Unlock()
+					worldMutex.Unlock()
+				case 'q':
+					worldMutex.Lock()
+					turnMutex.Lock()
+					writeFile(p, c, currentWorld, turnCounter)
+					turnMutex.Unlock()
+					worldMutex.Unlock()
+					keyQuit <- true
+				}
+			case <-closeKey:
+				terminate = true
+			}
+			if terminate	{
+				break
+			}
+			}
+
+		}()
 
 	for turn := 0; turn < turns; turn++ {
-		nextWorld := [][]byte{}
-		//Splitting up world and distributing to channels
-		remainderThreads := len(currentWorld) % p.Threads
-		offset := 0
-		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
-			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
-			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
-			workerChannels[sliceNum] <- currentSlice
-		}
-		//Reconstructing image from worker channels
-		for i := range workerChannels{
-			nextSlice := <- workerChannels[i]
-			for j := range nextSlice{
-				nextWorld = append(nextWorld, nextSlice[j])
-			}
-		}
-		select {
-		case command := <-c.keyPresses:
-			switch command	{
-			case 'p':
-				for  {
-					unPause :=  <-c.keyPresses
-					done := false
-					switch unPause	{
-					case 'p':
-						done = true
-						break
-					case 's':
-						worldMutex.Lock()
-						turnMutex.Lock()
-						writeFile(p, c, currentWorld, turnCounter)
-						turnMutex.Unlock()
-						worldMutex.Unlock()
-					case 'q':
-						worldMutex.Lock()
-						turnMutex.Lock()
-						writeFile(p, c, currentWorld, turnCounter)
-						turnMutex.Unlock()
-						worldMutex.Unlock()
-						done = true
-						turn = p.Turns
-					}
-					if done	{
-						break
+		for  {
+			select {
+				case <-keyQuit:
+					turn = turns
+			default:
+				nextWorld := [][]byte{}
+				//Splitting up world and distributing to channels
+				remainderThreads := len(currentWorld) % p.Threads
+				offset := 0
+				for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
+					go processNewSlice(workerChannels[sliceNum],c,turnCounter)
+					currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
+					workerChannels[sliceNum] <- currentSlice
+				}
+				//Reconstructing image from worker channels
+				for i := range workerChannels{
+					nextSlice := <- workerChannels[i]
+					for j := range nextSlice{
+						nextWorld = append(nextWorld, nextSlice[j])
 					}
 				}
-			case 's':
+				//update current world.
 				worldMutex.Lock()
-				turnMutex.Lock()
-				writeFile(p, c, currentWorld, turnCounter)
-				turnMutex.Unlock()
-				worldMutex.Unlock()
-			case 'q':
-				worldMutex.Lock()
-				turnMutex.Lock()
-				writeFile(p, c, currentWorld, turnCounter)
-				turnMutex.Unlock()
-				worldMutex.Unlock()
-				turn = p.Turns
-			}
-		default:
-		}
-		//update current world.
-		worldMutex.Lock()
-		for i := range currentWorld	{
-			for j := range currentWorld[i]	{
-				if currentWorld[i][j] != nextWorld[i][j]	{
-					c.events <- CellFlipped{Cell: util.Cell{X: i,Y: j},CompletedTurns: turns}
+				for i := range currentWorld	{
+					for j := range currentWorld[i]	{
+						if currentWorld[i][j] != nextWorld[i][j]	{
+							c.events <- CellFlipped{Cell: util.Cell{X: i,Y: j},CompletedTurns: turns}
+						}
+						currentWorld[i][j] = nextWorld[i][j]
+					}
 				}
-				currentWorld[i][j] = nextWorld[i][j]
+				worldMutex.Unlock()
+				turnMutex.Lock()
+				turnCounter ++
+				turnMutex.Unlock()
+				c.events <- TurnComplete{CompletedTurns: turnCounter}
 			}
 		}
-		worldMutex.Unlock()
-		turnMutex.Lock()
-		turnCounter ++
-		turnMutex.Unlock()
-		c.events <- TurnComplete{CompletedTurns: turnCounter}
-	}
 
-	turnsDone <- true
+	}
+	closeKey <- true
+	closeTicker <- true
 	//calculate the alive cells
 	aliveCells := make([]util.Cell	, 0, p.ImageWidth * p.ImageHeight)
 	for i , _ := range currentWorld {
@@ -172,7 +194,7 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 	c.events <- StateChange{turns, Quitting}
-	
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 }
@@ -298,3 +320,4 @@ func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int
 		Filename: outFile,
 	}
 }
+
