@@ -135,7 +135,6 @@ func distributor(p Params, c distributorChannels) {
 		}()
 
 	for turn := 0; turn < turns; turn++ {
-		for  {
 			select {
 				case <-keyQuit:
 					turn = turns
@@ -147,7 +146,7 @@ func distributor(p Params, c distributorChannels) {
 				for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
 					go processNewSlice(workerChannels[sliceNum],c,turnCounter)
 					currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
-					workerChannels[sliceNum] <- currentSlice
+					workerChannels[sliceNum] <	- currentSlice
 				}
 				//Reconstructing image from worker channels
 				for i := range workerChannels{
@@ -172,7 +171,6 @@ func distributor(p Params, c distributorChannels) {
 				turnMutex.Unlock()
 				c.events <- TurnComplete{CompletedTurns: turnCounter}
 			}
-		}
 
 	}
 	closeKey <- true
