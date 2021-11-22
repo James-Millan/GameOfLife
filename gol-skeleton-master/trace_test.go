@@ -12,7 +12,7 @@ import (
 func TestTrace(t *testing.T) {
 	traceParams := gol.Params{
 		Turns:       10,
-		Threads:     4,
+		Threads:     16,
 		ImageWidth:  64,
 		ImageHeight: 64,
 	}

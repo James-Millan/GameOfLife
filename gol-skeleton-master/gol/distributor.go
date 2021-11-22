@@ -98,11 +98,11 @@ func distributor(p Params, c distributorChannels) {
 		wrappedCurrentWorld = append(wrappedCurrentWorld,currentWorld...)
 		wrappedCurrentWorld = append(wrappedCurrentWorld,currentWorld[0])
 		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
-			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
-			//currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
-			currentSplit := splits[sliceNum]
-			currentSlice := wrappedCurrentWorld[currentSplit.Start:currentSplit.End]
-			workerChannels[sliceNum] <- currentSlice
+			go func(tst int){
+				currentSplit := splits[tst]
+				currentSlice := wrappedCurrentWorld[currentSplit.Start : currentSplit.End+1]
+				go processNewSlice(workerChannels[tst], currentSlice)
+			}(sliceNum)
 		}
 		//Reconstructing image from worker channels
 		for i := range workerChannels{
@@ -151,7 +151,6 @@ func distributor(p Params, c distributorChannels) {
 		default:
 		}
 		//update current world.
-		fmt.Println("C: ",len(currentWorld),"N: ",len(nextWorld))
 		for i := range currentWorld	{
 			for j := range currentWorld[i]	{
 				if currentWorld[i][j] != nextWorld[i][j]	{
@@ -187,11 +186,13 @@ func distributor(p Params, c distributorChannels) {
 }
 
 func splitWorld(threads int,numOfColumns int) []sliceIndices{
-	columnsPerChannel := numOfColumns / threads
-	remainders := numOfColumns % threads
+	numUnwrappedColumns := numOfColumns - 2
+	columnsPerChannel := numUnwrappedColumns / threads
+	remainders := numUnwrappedColumns % threads
 	currentColumn := 1
+	indicesNumber := 0
 	indices := make([]sliceIndices,threads)
-	for i := 0; i < threads;i++{
+	/*for i := 0; i < threads;i++{
 		currentIndices := sliceIndices{}
 		currentIndices.Start = currentColumn - 1
 		for j := 1;j < columnsPerChannel;j++{
@@ -204,6 +205,21 @@ func splitWorld(threads int,numOfColumns int) []sliceIndices{
 		currentIndices.End = currentColumn + 1
 		currentColumn++
 		indices[i] = currentIndices
+	}*/
+	for currentColumn != numOfColumns - 1{
+		currentIndices := sliceIndices{}
+		currentIndices.Start = currentColumn - 1
+		for i := 1;i < columnsPerChannel;i++{
+			currentColumn++
+		}
+		if remainders > 0{
+			remainders--
+			currentColumn++
+		}
+		currentIndices.End = currentColumn + 1
+		currentColumn++
+		indices[indicesNumber] = currentIndices
+		indicesNumber++
 	}
 	return indices
 }
@@ -244,10 +260,9 @@ func getAliveCellsCount(currentWorld [][]byte) int	{
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
-func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
-	currentSlice := <- channel
+func processNewSlice(channel chan [][]byte,slice [][]byte) {
+	currentSlice := slice
 	//Making new slice to write changes to
-	fmt.Println("processing ",len(currentSlice))
 	nextSlice := make([][]byte, len(currentSlice) - 2)
 	for i := range nextSlice{
 		nextSlice[i] = make([]byte, len(currentSlice[0]))
