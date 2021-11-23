@@ -2,6 +2,7 @@ package gol
 
 import (
 	"strconv"
+	"sync"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
@@ -23,7 +24,11 @@ type WorkerNode struct {
 	bIn          chan []byte
 	bOut         chan []byte
 	sliceChannel chan [][]byte
+	bSendFirst bool
+	tSendFirst bool
 }
+
+var initialWorldMutex sync.Mutex
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
@@ -53,8 +58,19 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	workerNodes := make([]WorkerNode, p.Threads)
+	currentSendsFirst := false
 	for i := 0; i < p.Threads; i++ {
-		workerNodes[i] = WorkerNode{tOut: make(chan []byte), bOut: make(chan []byte), sliceChannel: make(chan [][]byte)}
+		workerNodes[i] = WorkerNode{
+			tOut: make(chan []byte),
+			bOut: make(chan []byte),
+			sliceChannel: make(chan [][]byte),
+			bSendFirst: currentSendsFirst,
+			tSendFirst: currentSendsFirst,
+		}
+		currentSendsFirst = !currentSendsFirst
+	}
+	if p.Threads % 2 == 1 {
+		workerNodes[len(workerNodes) - 1].bSendFirst = !workerNodes[len(workerNodes) - 1].bSendFirst
 	}
 	for i := range workerNodes {
 		workerNodes[i].bIn = workerNodes[boundNumber(i+1, len(workerNodes))].tOut
@@ -84,20 +100,20 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}()
-
 	*/
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
-	nextWorld := [][]byte{}
 	//Splitting up world and distributing to channels
 	remainderThreads := len(currentWorld) % p.Threads
 	offset := 0
+	singleWorker := p.Threads == 1
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], false, nil, nil, nil, p.Turns)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker,nil, nil, nil, p.Turns)
 	}
 	//Reconstructing image from worker channels
 	for turn := 0; turn < p.Turns; turn++ {
+		nextWorld := [][]byte{}
 		for i := range workerNodes {
 			nextSlice := <-workerNodes[i].sliceChannel
 			for j := range nextSlice {
@@ -153,7 +169,6 @@ func distributor(p Params, c distributorChannels) {
 	default:
 	}
 	//update current world.
-
 	turnCounter++
 	c.events <- TurnComplete{CompletedTurns: turnCounter}
 	*/
@@ -215,27 +230,45 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 func worker(
 	fullSlice [][]byte,
 	nodeData WorkerNode,
-	parityBit bool,
+	onlyWorker bool,
 	turnCompleted chan int,
 	tickerCall chan int,
 	requestBoard chan bool,
 	totalTurns int) {
+	//initialWorldMutex.Lock()
 	currentSlice := fullSlice
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice))
 	for i := range nextSlice {
 		nextSlice[i] = make([]byte, len(currentSlice[0]))
 	}
+	//initialWorldMutex.Unlock()
 
 	for turn := 0; turn < totalTurns; turn++ {
-		go func() {
-			bottomHaloToSend := currentSlice[len(currentSlice)-1]
-			nodeData.bOut <- bottomHaloToSend
-			topHaloToSend := currentSlice[0]
-			nodeData.tOut <- topHaloToSend
-		}()
-		topHalo := <-nodeData.tIn
-		bottomHalo := <-nodeData.bIn
+		bottomHaloToSend := currentSlice[len(currentSlice)-1]
+		topHaloToSend := currentSlice[0]
+		var topHalo []byte
+		var bottomHalo []byte
+
+		if onlyWorker {
+			topHalo = bottomHaloToSend
+			bottomHalo = topHaloToSend
+		}else {
+			if nodeData.tSendFirst {
+				nodeData.tOut <- topHaloToSend
+				bottomHalo = <-nodeData.bIn
+			} else {
+				bottomHalo = <-nodeData.bIn
+				nodeData.tOut <- topHaloToSend
+			}
+			if nodeData.bSendFirst {
+				nodeData.bOut <- bottomHaloToSend
+				topHalo = <-nodeData.tIn
+			} else {
+				topHalo = <-nodeData.tIn
+				nodeData.bOut <- bottomHaloToSend
+			}
+		}
 
 		for i := range currentSlice {
 			for j := range currentSlice[i] {
@@ -251,6 +284,7 @@ func worker(
 				}
 			}
 		}
+
 		nodeData.sliceChannel <- nextSlice
 		currentSlice = nextSlice
 	}
