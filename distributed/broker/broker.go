@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"net/rpc"
@@ -220,8 +221,10 @@ func main() {
 	shutdownChannel = make(chan bool)
 	turnChannel = make(chan int)
 	rpc.Register(&BrokerOperations{})
+	port := flag.String("port","8040","Port broker will listen on")
+	flag.Parse()
 	var err error
-	listener, err = net.Listen("tcp", ":8040")
+	listener, err = net.Listen("tcp", ":"+*port)
 	if err != nil {
 		fmt.Println("Broker listening error: ", err.Error())
 	}
