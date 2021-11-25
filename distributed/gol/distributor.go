@@ -3,10 +3,10 @@ package gol
 import (
 	"bufio"
 	"fmt"
-	"net"
 	"net/rpc"
 	"os"
 	"strconv"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/stubs"
 )
@@ -21,16 +21,15 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
-type ControllerOperations struct {}
+var killChannel chan bool
+var pauseChannel chan bool
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-	eventsChannel = c.events
-
+	killChannel = make(chan bool)
+	pauseChannel = make(chan bool)
 	var brokerIp string
-	var myIp string
-	var myPort string
-	readConfigFile(&brokerIp,&myPort,&myIp)
+	readConfigFile(&brokerIp)
 
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
@@ -63,22 +62,14 @@ func distributor(p Params, c distributorChannels) {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
-
-	rpc.Register(&ControllerOperations{})
-	aliveListener,aerr := net.Listen("tcp",":"+myPort)
-	if aerr != nil{
-		fmt.Println("Distributor listening error: "+aerr.Error())
-	}
-	go aliveCellsListen(aliveListener)
-	subRequest := stubs.SubscriptionRequest{IP: myIp+":"+myPort}
-	subResp := new(stubs.GenericMessage)
-	client.Call(stubs.SubscribeController,subRequest,subResp)
+	ticker := time.NewTicker(2*time.Second)
+	go aliveCellsRetriever(client,c,ticker)
 	go readKeys(c,client,p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
-
-	aliveListener.Close()
+	ticker.Stop()
+	killChannel <- true
 	//currentWorld = resp.NextWorld
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
@@ -96,16 +87,12 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func readConfigFile(brokerIp *string,myPort *string,myIp *string){
+func readConfigFile(brokerIp *string){
 	file, rerr := os.Open("gol/config")
 	if rerr != nil {
 		fmt.Println("Error reading config file: "+rerr.Error())
 	}
 	reader := bufio.NewScanner(file)
-	reader.Scan()
-	*myIp = reader.Text()
-	reader.Scan()
-	*myPort = reader.Text()
 	reader.Scan()
 	*brokerIp = reader.Text()
 	file.Close()
@@ -120,18 +107,23 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 				fmt.Println("s")
 				getPGMFromServer(broker, p, c)
 			case 'k':
-				fmt.Println("s")
+				fmt.Println("k")
 				getPGMFromServer(broker, p, c)
+				killChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
 				broker.Call(stubs.KillBroker, req, resp)
 				broker.Close()
 			case 'q':
 				fmt.Println("q")
+				req := new(stubs.GenericMessage)
+				resp := new(stubs.GenericMessage)
+				broker.Call(stubs.DisconnectController,req,resp)
 				broker.Close()
 				break
 			case 'p':
 				fmt.Println("p")
+				pauseChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.PauseResponse)
 				broker.Call(stubs.TogglePause,req,resp)
@@ -153,15 +145,21 @@ func getPGMFromServer(broker *rpc.Client,p Params,c distributorChannels){
 	writeFile(p,c,resp.World,resp.Turns)
 }
 
-func aliveCellsListen(listener net.Listener){
-	rpc.Accept(listener)
-}
-
-var eventsChannel chan <- Event
-
-func (b *ControllerOperations) ReceiveAliveCells(req stubs.AliveCellsRequest, resp *stubs.GenericMessage) (err error){
-	eventsChannel <- AliveCellsCount{CellsCount: req.Cells,CompletedTurns: req.TurnsCompleted}
-	return
+func aliveCellsRetriever(server *rpc.Client,c distributorChannels,ticker *time.Ticker){
+	for{
+		select{
+		case <-ticker.C:
+			req := stubs.GenericMessage{}
+			resp := new(stubs.AliveCellsResponse)
+			server.Call(stubs.GetAliveCells,req,resp)
+			c.events <- AliveCellsCount{resp.TurnsCompleted,resp.Cells}
+			case <-pauseChannel:
+				<-pauseChannel
+			case <-killChannel:
+				break
+			default:
+		}
+	}
 }
 
 func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int) {

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"time"
-
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -14,14 +12,16 @@ import (
 var listener net.Listener
 var workers []string
 var workerClients []*rpc.Client
-var controller *rpc.Client
 var requestingPGM bool
 var PGMChannel chan [][]uint8
 var paused bool
 var pauseChannel chan bool
 var turnChannel chan int
+var cellsChannel chan int
+var requestingCells bool
 var requestingShutdown bool
 var shutdownChannel chan bool
+var stopCallChannel chan bool
 
 type BrokerOperations struct{}
 
@@ -58,16 +58,29 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGMResponse) (err error){
 	requestingPGM = true
 	resp.World = <-PGMChannel
+	resp.Turns = <-turnChannel
 	return
 }
 
-func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
+/*func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
 	controller,err = rpc.Dial("tcp", req.IP)
 	if err != nil{
 		fmt.Println("Failed to connect to controller on "+req.IP+" - "+err.Error())
 	}else {
 		fmt.Println("Connected to controller on "+req.IP)
 	}
+	return
+}*/
+
+func (b *BrokerOperations) GetAliveCells(req stubs.GenericMessage,resp *stubs.AliveCellsResponse) (err error){
+	requestingCells = true
+	resp.Cells = <- cellsChannel
+	resp.TurnsCompleted = <- turnChannel
+	return
+}
+
+func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage,resp *stubs.GenericMessage) (err error){
+	stopCallChannel <- true
 	return
 }
 
@@ -88,11 +101,10 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		//defer newClient.Close()
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
-
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
 	columnsPerChannel := len(currentWorld) / len(workerClients)
+	breakLoop := false
 	for turn := 0; turn < turns; turn++ {
 		nextWorld := [][]byte{}
 		//Splitting up world and distributing to channels
@@ -110,7 +122,7 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
-		select {
+		/*select {
 		case <-ticker.C:
 			cells := getAliveCellsCount(currentWorld)
 			cellsReq := stubs.AliveCellsRequest{Cells: cells,TurnsCompleted: turn}
@@ -118,9 +130,15 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 			controller.Call(stubs.ReceiveAliveCells, cellsReq, cellsResp)
 			fmt.Println("sent")
 		default:
+		}*/
+		if requestingCells{
+			cellsChannel <- getAliveCellsCount(currentWorld)
+			turnChannel <- turn
+			requestingCells = false
 		}
 		if requestingPGM{
 			PGMChannel <- currentWorld
+			turnChannel <- turn
 			requestingPGM = false
 		}
 		if requestingShutdown{
@@ -134,8 +152,15 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 		if req.Turns > 0 {
 			currentWorld = nextWorld
 		}
+		select {
+		case <-stopCallChannel:
+			breakLoop = true
+		default:
+		}
+		if breakLoop {
+			break
+		}
 	}
-	ticker.Stop()
 	resp.NextWorld = currentWorld
 
 	//calculate the alive cells
@@ -150,7 +175,6 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	}
 
 	resp.AliveCells = aliveCells
-
 	return
 }
 
@@ -215,11 +239,14 @@ func boundNumber(num int, worldLen int) int {
 func main() {
 	requestingPGM = false
 	requestingShutdown = false
+	requestingCells = false
 	paused = false
 	PGMChannel = make(chan [][]uint8,1)
 	pauseChannel = make(chan bool)
 	shutdownChannel = make(chan bool)
 	turnChannel = make(chan int)
+	cellsChannel = make(chan int)
+	stopCallChannel = make(chan bool)
 	rpc.Register(&BrokerOperations{})
 	port := flag.String("port","8040","Port broker will listen on")
 	flag.Parse()

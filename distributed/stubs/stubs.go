@@ -6,11 +6,12 @@ var ProcessSlice = "WorkerOperations.ProcessSlice"
 var BrokerRequest = "BrokerOperations.BrokerRequest"
 var SubscribeWorker = "BrokerOperations.SubscribeWorker"
 var SubscribeController = "BrokerOperations.SubscribeController"
-var ReceiveAliveCells = "ControllerOperations.ReceiveAliveCells"
+var GetAliveCells = "BrokerOperations.GetAliveCells"
 var KeyPressPGM = "BrokerOperations.KeyPressPGM"
 var KillBroker = "BrokerOperations.Kill"
 var KillWorker = "WorkerOperations.Kill"
 var TogglePause = "BrokerOperations.TogglePause"
+var DisconnectController = "BrokerOperations.DisconnectController"
 
 type SubscriptionRequest struct {
 	IP string
@@ -21,7 +22,7 @@ type PGMResponse struct{
 	Turns int
 }
 
-type AliveCellsRequest struct{
+type AliveCellsResponse struct{
 	Cells int
 	TurnsCompleted int
 }
