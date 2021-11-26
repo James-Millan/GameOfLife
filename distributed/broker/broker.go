@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"sync"
+
 	"uk.ac.bris.cs/gameoflife/stubs"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -12,41 +14,49 @@ import (
 var listener net.Listener
 var workers []string
 var workerClients []*rpc.Client
+
 var requestingPGM bool
 var PGMChannel chan [][]uint8
+
 var paused bool
 var pauseChannel chan bool
 var turnChannel chan int
 var cellsChannel chan int
-var requestingCells bool
+
+var pgmMutex sync.Mutex
+var killMutex sync.Mutex
+
 var requestingShutdown bool
 var shutdownChannel chan bool
 var stopCallChannel chan bool
 
 type BrokerOperations struct{}
 
-func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
-	workers = append(workers,req.IP)
-	fmt.Println("Received subscription request from worker on "+req.IP)
+func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error) {
+	workers = append(workers, req.IP)
+	fmt.Println("Received subscription request from worker on " + req.IP)
 	return
 }
 
-func (b *BrokerOperations) TogglePause(req stubs.GenericMessage, resp *stubs.PauseResponse) (err error){
+func (b *BrokerOperations) TogglePause(req stubs.GenericMessage, resp *stubs.PauseResponse) (err error) {
 	paused = !paused
 	if paused {
+		pauseChannel <- true
 		resp.Resuming = false
 		resp.Turn = <-turnChannel
-	}else{
+	} else {
 		<-pauseChannel
 		resp.Resuming = true
 	}
 	return
 }
 
-func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
+func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error) {
+	killMutex.Lock()
 	requestingShutdown = true
-	<- shutdownChannel
-	for i := range workerClients{
+	killMutex.Unlock()
+	<-shutdownChannel
+	for i := range workerClients {
 		wReq := new(stubs.GenericMessage)
 		wResp := new(stubs.GenericMessage)
 		err := workerClients[i].Call(stubs.KillWorker, wReq, wResp)
@@ -54,15 +64,17 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 			panic(err)
 		}
 	}
-	err := listener.Close()
+	err = listener.Close()
 	if err != nil {
 		panic(err)
 	}
 	return
 }
 
-func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGMResponse) (err error){
+func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGMResponse) (err error) {
+	pgmMutex.Lock()
 	requestingPGM = true
+	pgmMutex.Unlock()
 	resp.World = <-PGMChannel
 	resp.Turns = <-turnChannel
 	return
@@ -78,14 +90,14 @@ func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGM
 	return
 }*/
 
-func (b *BrokerOperations) GetAliveCells(req stubs.GenericMessage,resp *stubs.AliveCellsResponse) (err error){
-	requestingCells = true
-	resp.Cells = <- cellsChannel
-	resp.TurnsCompleted = <- turnChannel
+func (b *BrokerOperations) GetAliveCells(req stubs.GenericMessage, resp *stubs.AliveCellsResponse) (err error) {
+	cellsChannel <- 0
+	resp.Cells = <-cellsChannel
+	resp.TurnsCompleted = <-turnChannel
 	return
 }
 
-func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage,resp *stubs.GenericMessage) (err error){
+func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error) {
 	stopCallChannel <- true
 	return
 }
@@ -137,23 +149,31 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 			fmt.Println("sent")
 		default:
 		}*/
-		if requestingCells{
+		select {
+		case <-cellsChannel:
 			cellsChannel <- getAliveCellsCount(currentWorld)
 			turnChannel <- turn
-			requestingCells = false
+		default:
 		}
-		if requestingPGM{
+		pgmMutex.Lock()
+		if requestingPGM {
 			PGMChannel <- currentWorld
 			turnChannel <- turn
 			requestingPGM = false
 		}
-		if requestingShutdown{
+		pgmMutex.Unlock()
+		killMutex.Lock()
+		if requestingShutdown {
 			shutdownChannel <- true
+			requestingShutdown = false
 			break
 		}
-		if paused{
-			turnChannel<-turn
-			pauseChannel<-true
+		killMutex.Unlock()
+		select {
+		case <-pauseChannel:
+			turnChannel <- turn
+			pauseChannel <- true
+		default:
 		}
 		if req.Turns > 0 {
 			currentWorld = nextWorld
@@ -246,11 +266,12 @@ func boundNumber(num int, worldLen int) int {
 }*/
 
 func main() {
+	pgmMutex = sync.Mutex{}
+	killMutex = sync.Mutex{}
+	paused = false
 	requestingPGM = false
 	requestingShutdown = false
-	requestingCells = false
-	paused = false
-	PGMChannel = make(chan [][]uint8,1)
+	PGMChannel = make(chan [][]uint8, 1)
 	pauseChannel = make(chan bool)
 	shutdownChannel = make(chan bool)
 	turnChannel = make(chan int)

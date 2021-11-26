@@ -37,10 +37,7 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	//brokerIp := flag.String("broker", "127.0.0.1:8030", "IP address of broker")
-	//flag.Parse()
-
-	//TODO read in initial state of GOL using io.go
+	//read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
 	fmt.Println(filename)
@@ -52,11 +49,10 @@ func distributor(p Params, c distributorChannels) {
 			currentWorld[j][k] = <-c.ioInput
 		}
 	}
-	//fine up to here (works on 0 turns)
+	//Execute all turns of the Game of Life.
 
-	// TODO: Execute all turns of the Game of Life.
+
 	turns := p.Turns
-
 	client, err := rpc.Dial("tcp", string(brokerIp))
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
@@ -78,9 +74,8 @@ func distributor(p Params, c distributorChannels) {
 	}
 	ticker.Stop()
 	killChannel <- true
-	//currentWorld = resp.NextWorld
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
+	//Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turns,
 		Alive:          resp.AliveCells}
@@ -95,18 +90,21 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func readConfigFile(brokerIp *string){
+func readConfigFile(brokerIp *string) {
 	file, rerr := os.Open("gol/config")
 	if rerr != nil {
-		fmt.Println("Error reading config file: "+rerr.Error())
+		fmt.Println("Error reading config file: " + rerr.Error())
 	}
 	reader := bufio.NewScanner(file)
 	reader.Scan()
 	*brokerIp = reader.Text()
-	file.Close()
+	err := file.Close()
+	if err != nil {
+		panic(err)
+	}
 }
 
-func readKeys(c distributorChannels,broker *rpc.Client,p Params){
+func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 	for {
 		select {
 		case command := <-c.keyPresses:
@@ -120,24 +118,39 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 				killChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
-				broker.Call(stubs.KillBroker, req, resp)
-				broker.Close()
+				err := broker.Call(stubs.KillBroker, req, resp)
+				if err != nil {
+					panic(err)
+				}
+				err = broker.Close()
+				if err != nil {
+					panic(err)
+				}
 			case 'q':
 				fmt.Println("q")
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
-				broker.Call(stubs.DisconnectController,req,resp)
-				broker.Close()
+				err := broker.Call(stubs.DisconnectController, req, resp)
+				if err != nil {
+					panic(err)
+				}
+				err = broker.Close()
+				if err != nil {
+					panic(err)
+				}
 				break
 			case 'p':
 				fmt.Println("p")
 				pauseChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.PauseResponse)
-				broker.Call(stubs.TogglePause,req,resp)
+				err := broker.Call(stubs.TogglePause, req, resp)
+				if err != nil {
+					panic(err)
+				}
 				if resp.Resuming {
 					fmt.Println("Continuing")
-				}else{
+				} else {
 					fmt.Println(resp.Turn)
 				}
 			}
@@ -146,19 +159,23 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 	}
 }
 
-func getPGMFromServer(broker *rpc.Client,p Params,c distributorChannels){
+func getPGMFromServer(broker *rpc.Client, p Params, c distributorChannels) {
 	req := new(stubs.GenericMessage)
 	resp := new(stubs.PGMResponse)
-	broker.Call(stubs.KeyPressPGM,req,resp)
-	writeFile(p,c,resp.World,resp.Turns)
+	err := broker.Call(stubs.KeyPressPGM, req, resp)
+	if err != nil {
+		panic(err)
+	}
+	writeFile(p, c, resp.World, resp.Turns)
 }
 
-func aliveCellsRetriever(server *rpc.Client,c distributorChannels,ticker *time.Ticker){
-	for{
-		select{
+func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time.Ticker) {
+	for {
+		select {
 		case <-ticker.C:
 			req := stubs.GenericMessage{}
 			resp := new(stubs.AliveCellsResponse)
+
 			err := server.Call(stubs.GetAliveCells, req, resp)
 			if err != nil {
 				panic(err)
