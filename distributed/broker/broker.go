@@ -33,7 +33,7 @@ func (b *BrokerOperations) SubscribeWorker(req stubs.SubscriptionRequest, resp *
 
 func (b *BrokerOperations) TogglePause(req stubs.GenericMessage, resp *stubs.PauseResponse) (err error){
 	paused = !paused
-	if(paused){
+	if paused {
 		resp.Resuming = false
 		resp.Turn = <-turnChannel
 	}else{
@@ -49,9 +49,15 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 	for i := range workerClients{
 		wReq := new(stubs.GenericMessage)
 		wResp := new(stubs.GenericMessage)
-		workerClients[i].Call(stubs.KillWorker,wReq,wResp)
+		err := workerClients[i].Call(stubs.KillWorker, wReq, wResp)
+		if err != nil {
+			panic(err)
+		}
 	}
-	listener.Close()
+	err := listener.Close()
+	if err != nil {
+		panic(err)
+	}
 	return
 }
 
@@ -85,7 +91,7 @@ func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage,resp *s
 }
 
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
-	clientChannels := []chan [][]uint8{}
+	var clientChannels []chan [][]uint8
 	workerClients = []*rpc.Client{}
 	//Creating channels and connections to workers nodes
 	for i := range workers {
@@ -106,7 +112,7 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	columnsPerChannel := len(currentWorld) / len(workerClients)
 	breakLoop := false
 	for turn := 0; turn < turns; turn++ {
-		nextWorld := [][]byte{}
+		var nextWorld [][]byte
 		//Splitting up world and distributing to channels
 		remainders := len(currentWorld) % len(workerClients)
 		offset := 0
@@ -179,7 +185,7 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 }
 
 func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, remainderThreads *int, offset *int) [][]uint8 {
-	currentSlice := [][]uint8{}
+	var currentSlice [][]uint8
 	//Adding extra column to back of slice to avoid lines of cells that aren't processed
 	extraBackColumnIndex := boundNumber(sliceNum*columnsPerChannel-1+*offset, len(currentWorld))
 	currentSlice = append(currentSlice, currentWorld[extraBackColumnIndex])
@@ -215,7 +221,10 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 func callWorker(channel chan [][]uint8, workerClient *rpc.Client) {
 	req := stubs.Request{CurrentWorld: <-channel}
 	resp := new(stubs.Response)
-	workerClient.Call(stubs.ProcessSlice, req, resp)
+	err := workerClient.Call(stubs.ProcessSlice, req, resp)
+	if err != nil {
+		panic(err)
+	}
 	channel <- resp.NextWorld
 }
 
@@ -247,10 +256,12 @@ func main() {
 	turnChannel = make(chan int)
 	cellsChannel = make(chan int)
 	stopCallChannel = make(chan bool)
-	rpc.Register(&BrokerOperations{})
+	err := rpc.Register(&BrokerOperations{})
+	if err != nil {
+		panic(err)
+	}
 	port := flag.String("port","8040","Port broker will listen on")
 	flag.Parse()
-	var err error
 	listener, err = net.Listen("tcp", ":"+*port)
 	if err != nil {
 		fmt.Println("Broker listening error: ", err.Error())

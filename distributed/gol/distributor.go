@@ -1,4 +1,4 @@
-package gol
+	package gol
 
 import (
 	"bufio"
@@ -61,13 +61,21 @@ func distributor(p Params, c distributorChannels) {
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
-	defer client.Close()
+	defer func(client *rpc.Client) {
+		err := client.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(client)
 	ticker := time.NewTicker(2*time.Second)
 	go aliveCellsRetriever(client,c,ticker)
 	go readKeys(c,client,p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
-	client.Call(stubs.BrokerRequest, req, resp)
+	err = client.Call(stubs.BrokerRequest, req, resp)
+	if err != nil {
+		panic(err)
+	}
 	ticker.Stop()
 	killChannel <- true
 	//currentWorld = resp.NextWorld
@@ -151,7 +159,10 @@ func aliveCellsRetriever(server *rpc.Client,c distributorChannels,ticker *time.T
 		case <-ticker.C:
 			req := stubs.GenericMessage{}
 			resp := new(stubs.AliveCellsResponse)
-			server.Call(stubs.GetAliveCells,req,resp)
+			err := server.Call(stubs.GetAliveCells, req, resp)
+			if err != nil {
+				panic(err)
+			}
 			c.events <- AliveCellsCount{resp.TurnsCompleted,resp.Cells}
 			case <-pauseChannel:
 				<-pauseChannel
@@ -176,10 +187,8 @@ func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
-
 	c.events <- ImageOutputComplete{
 		CompletedTurns: turns,
 		Filename:       outFile,
 	}
-
 }

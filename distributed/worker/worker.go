@@ -21,10 +21,19 @@ func main() {
 	}
 	subRequest := stubs.SubscriptionRequest{IP: *myIp+":"+*port}
 	subResp := new(stubs.GenericMessage)
-	subscriber.Call(stubs.SubscribeWorker,subRequest,subResp)
-	subscriber.Close()
-	rpc.Register(&WorkerOperations{})
-	var err error
+	err := subscriber.Call(stubs.SubscribeWorker, subRequest, subResp)
+	if err != nil {
+		panic(err)
+	}
+	err = subscriber.Close()
+	if err != nil {
+		panic(err)
+	}
+	err = rpc.Register(&WorkerOperations{})
+	if err != nil {
+		panic(err)
+	}
+
 	listener, err = net.Listen("tcp", ":"+*port)
 	if err != nil {
 		fmt.Println("Worker listening error: ", err.Error())
@@ -35,12 +44,15 @@ func main() {
 type WorkerOperations struct{}
 
 func (w *WorkerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
-	listener.Close()
+	err = listener.Close()
+	if err != nil {
+		panic(err)
+	}
 	return
 }
 
 func (w *WorkerOperations) ProcessSlice(req stubs.Request, resp *stubs.Response) (err error) {
-	fmt.Println("Recieved")
+	fmt.Println("Received")
 
 	currentSlice := req.CurrentWorld
 	//Making new slice to write changes to
@@ -105,9 +117,9 @@ func getNumSurroundingCells(x int, y int, world [][]byte) int {
 }
 
 func boundNumber(num int,worldLen int) int{
-	if(num < 0){
+	if num < 0 {
 		return num + worldLen
-	}else if(num > worldLen - 1){
+	}else if num > worldLen - 1 {
 		return num - worldLen
 	}else{
 		return num

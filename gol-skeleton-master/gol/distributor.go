@@ -19,18 +19,15 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
 	for i := 0; i < p.ImageWidth; i++ {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	//TODO read in initial state of GOL using io.go
-	width := strconv.Itoa(p.ImageWidth)
-	filename := width + "x" + width
+	//read in initial state of GOL using io.go
+	filename := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageHeight)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
 	//read file into current world
@@ -43,39 +40,26 @@ func distributor(p Params, c distributorChannels) {
 			currentWorld[j][k] = newPixel
 		}
 	}
-
-	workerChannels := []chan [][]byte{}
+	//initialize worker channels.
+	var workerChannels []chan [][]byte
 	for i := 0;i < p.Threads;i++ {
 		workerChannels = append(workerChannels, make(chan [][]byte))
 	}
+
 	// Execute all turns of the Game of Life.
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	turnCounter := 0
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
+
+	// Execute all turns of the Game of Life.
 	for turn := 0; turn < turns; turn++ {
-		nextWorld := [][]byte{}
-		//Splitting up world and distributing to channels
-		remainderThreads := len(currentWorld) % p.Threads
-		offset := 0
-		for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
-			go processNewSlice(workerChannels[sliceNum],c,turnCounter)
-			currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
-			workerChannels[sliceNum] <- currentSlice
-		}
-		//Reconstructing image from worker channels
-		for i := range workerChannels{
-			nextSlice := <- workerChannels[i]
-			for j := range nextSlice{
-				nextWorld = append(nextWorld, nextSlice[j])
-			}
-		}
 		select {
 		case <-ticker.C:
 			cells := getAliveCellsCount(currentWorld)
 			c.events <- AliveCellsCount{CellsCount: cells,CompletedTurns: turnCounter}
-		default:
-		}
-		select {
 		case command := <-c.keyPresses:
 			switch command	{
 			case 'p':
@@ -106,19 +90,35 @@ func distributor(p Params, c distributorChannels) {
 				writeFile(p, c, currentWorld, turnCounter)
 				turn = p.Turns
 			}
-		default:
-		}
-		//update current world.
-		for i := range currentWorld	{
-			for j := range currentWorld[i]	{
-				if currentWorld[i][j] != nextWorld[i][j]	{
-					c.events <- CellFlipped{Cell: util.Cell{X: i,Y: j},CompletedTurns: turns}
+			default:
+				nextWorld := [][]byte{}
+				//Splitting up world and distributing to channels
+				remainderThreads := len(currentWorld) % p.Threads
+				offset := 0
+				for sliceNum := 0; sliceNum < p.Threads; sliceNum++{
+					go worker(workerChannels[sliceNum])
+					currentSlice := sliceWorld(sliceNum,columnsPerChannel,currentWorld,&remainderThreads,&offset)
+					workerChannels[sliceNum] <- currentSlice
 				}
-				currentWorld[i][j] = nextWorld[i][j]
-			}
+				//Reconstructing image from worker channels
+				for i := range workerChannels{
+					nextSlice := <- workerChannels[i]
+					for j := range nextSlice{
+						nextWorld = append(nextWorld, nextSlice[j])
+					}
+				}
+				//update current world.
+				for i := range currentWorld	{
+					for j := range currentWorld[i]	{
+						if currentWorld[i][j] != nextWorld[i][j]	{
+							c.events <- CellFlipped{Cell: util.Cell{X: i,Y: j},CompletedTurns: turns}
+						}
+						currentWorld[i][j] = nextWorld[i][j]
+					}
+				}
+				turnCounter++
+				c.events <- TurnComplete{CompletedTurns: turnCounter}
 		}
-		turnCounter ++
-		c.events <- TurnComplete{CompletedTurns: turnCounter}
 	}
 
 	//calculate the alive cells
@@ -145,10 +145,10 @@ func distributor(p Params, c distributorChannels) {
 
 //Helper function for splitting the world into slices
 func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remainderThreads *int,offset *int) [][]byte{
-	currentSlice := [][]byte{}
+	var currentSlice [][]byte
 	//Adding extra column to back of slice to avoid lines of cells that aren't processed
-	extraBackColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1 + *offset,len(currentWorld))
-	currentSlice = append(currentSlice,currentWorld[extraBackColumnIndex])
+	extraBackHaloColumnIndex := boundNumber(sliceNum * columnsPerChannel - 1 + *offset,len(currentWorld))
+	currentSlice = append(currentSlice,currentWorld[extraBackHaloColumnIndex])
 	for i := 0;i < columnsPerChannel;i++{
 		currentSlice = append(currentSlice,currentWorld[boundNumber(sliceNum * columnsPerChannel + i + *offset,len(currentWorld))])
 	}
@@ -160,8 +160,8 @@ func sliceWorld(sliceNum int,columnsPerChannel int,currentWorld [][]byte,remaind
 		*offset += 1
 	}
 	//Adding extra column to front of slice to avoid lines of cells that aren't processed
-	extraFrontColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
-	currentSlice = append(currentSlice,currentWorld[extraFrontColumnIndex])
+	extraFrontHaloColumnIndex := boundNumber(sliceNum * columnsPerChannel + columnsPerChannel + *offset,len(currentWorld))
+	currentSlice = append(currentSlice,currentWorld[extraFrontHaloColumnIndex])
 	return currentSlice
 }
 
@@ -179,7 +179,7 @@ func getAliveCellsCount(currentWorld [][]byte) int	{
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
-func processNewSlice(channel chan [][]byte,c distributorChannels,turns int) {
+func worker(channel chan [][]byte) {
 	currentSlice := <- channel
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice) - 2)
@@ -241,6 +241,7 @@ func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 	return counter
 }
 
+//function is only necessary since golang's modulo operator can return negative values
 func boundNumber(num int,worldLen int) int{
 	if num < 0 {
 		return num + worldLen
@@ -251,6 +252,7 @@ func boundNumber(num int,worldLen int) int{
 	}
 }
 
+//writes file safely
 func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int)	{
 	outFile := strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(p.ImageWidth) + "x" + strconv.Itoa(turns)
 	c.ioCommand <- ioOutput

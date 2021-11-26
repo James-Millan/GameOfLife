@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"os"
+	//"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -45,6 +45,25 @@ func TestGol(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkGol(t *testing.B) {
+	p := gol.Params{ImageWidth: 512, ImageHeight: 512}
+	//os.Stdout = nil
+	p.Turns = 100
+		for threads := 1; threads <= 16; threads++ {
+			p.Threads = threads
+			testName := fmt.Sprintf("%dx%dx%d-%d", p.ImageWidth, p.ImageHeight, p.Turns, p.Threads)
+			t.Run(fmt.Sprintf(testName, threads), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					events := make(chan gol.Event)
+					b.ResetTimer()
+					go gol.Run(p, events, nil)
+					for range events {
+					}
+					}
+				})
+		}
+	}
 
 func boardFail(t *testing.T, given, expected []util.Cell, p gol.Params) bool {
 	errorString := fmt.Sprintf("-----------------\n\n  FAILED TEST\n  %vx%v\n  %d Workers\n  %d Turns\n", p.ImageWidth, p.ImageHeight, p.Threads, p.Turns)
@@ -127,21 +146,22 @@ func readAliveCells(path string, width, height int) []util.Cell {
 	}
 	return cells
 }
-
+/*
 func BenchmarkGol(b *testing.B) {
 	os.Stdout = nil
 	for threads := 1; threads <= 16; threads++	{
+		params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 16, ImageHeight: 16}
 		b.Run(fmt.Sprintf("%d_workers", threads), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				keyPresses := make(chan rune, 10)
 				events := make(chan gol.Event, 1000)
-				params := gol.Params{Turns: 100, Threads: threads, ImageWidth: 16, ImageHeight: 16}
-				gol.Run(params, events, keyPresses)
-				close(keyPresses)
+				b.ResetTimer()
+				gol.Run(params, events, nil)
 			}
 		})
 	}
 }
+
+ */
 
 
 
