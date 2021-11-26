@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -24,8 +25,10 @@ type WorkerNode struct {
 	bIn          chan []byte
 	bOut         chan []byte
 	sliceChannel chan [][]byte
-	bSendFirst bool
-	tSendFirst bool
+	requestBoard chan bool
+	bSendFirst   bool
+	tSendFirst   bool
+	turnComplete chan int
 }
 
 var initialWorldMutex sync.Mutex
@@ -41,7 +44,7 @@ func distributor(p Params, c distributorChannels) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	//TODO read in initial state of GOL using io.go
+	//read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
 	filename := width + "x" + width
 	c.ioCommand <- ioInput
@@ -64,6 +67,8 @@ func distributor(p Params, c distributorChannels) {
 			tOut: make(chan []byte),
 			bOut: make(chan []byte),
 			sliceChannel: make(chan [][]byte),
+			requestBoard: make(chan bool),
+			turnComplete: make(chan int),
 			bSendFirst: currentSendsFirst,
 			tSendFirst: currentSendsFirst,
 		}
@@ -77,30 +82,6 @@ func distributor(p Params, c distributorChannels) {
 		workerNodes[i].tIn = workerNodes[boundNumber(i-1, len(workerNodes))].bOut
 	}
 
-	//TODO implement keypress logic.
-
-	// Execute all turns of the Game of Life.
-	//turnCounter := 0
-
-	/*go func() {
-		for  {
-			select {
-			case command := <-c.keyPresses:
-				switch command	{
-				case 'p':
-					fmt.Println("p")
-				case 's':
-					fmt.Println("s")
-					writeFile(p, c, currentWorld, turnCounter)
-				case 'q':
-					fmt.Println("q")
-					writeAndQuit(p, c, currentWorld, turnCounter)
-				}
-			default:
-			}
-		}
-	}()
-	*/
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	//Splitting up world and distributing to channels
@@ -109,16 +90,18 @@ func distributor(p Params, c distributorChannels) {
 	singleWorker := p.Threads == 1
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], singleWorker,nil, nil, nil, p.Turns)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker,nil, p.Turns)
 	}
 	//Reconstructing image from worker channels
 	for turn := 0; turn < p.Turns; turn++ {
-		nextWorld := [][]byte{}
+		var nextWorld [][]byte
 		for i := range workerNodes {
+			workerNodes[i].requestBoard <- true
 			nextSlice := <-workerNodes[i].sliceChannel
 			for j := range nextSlice {
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
+			workerNodes[i].turnComplete <- turn
 		}
 		for i := range currentWorld {
 			for j := range currentWorld[i] {
@@ -129,49 +112,6 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 	}
-	/*select {
-	case <-ticker.C:
-		cells := getAliveCellsCount(currentWorld)
-		c.events <- AliveCellsCount{CellsCount: cells, CompletedTurns: turnCounter}
-	default:
-	}
-	select {
-	case command := <-c.keyPresses:
-		switch command {
-		case 'p':
-			fmt.Println("p")
-			for {
-				unPause := <-c.keyPresses
-				done := false
-				switch unPause {
-				case 'p':
-					done = true
-					break
-				case 's':
-					writeFile(p, c, currentWorld, turnCounter)
-				case 'q':
-					writeFile(p, c, currentWorld, turnCounter)
-					done = true
-					turn = p.Turns
-				}
-				if done {
-					break
-				}
-			}
-		case 's':
-			fmt.Println("s")
-			writeFile(p, c, currentWorld, turnCounter)
-		case 'q':
-			fmt.Println("q")
-			writeFile(p, c, currentWorld, turnCounter)
-			turn = p.Turns
-		}
-	default:
-	}
-	//update current world.
-	turnCounter++
-	c.events <- TurnComplete{CompletedTurns: turnCounter}
-	*/
 
 	//calculate the alive cells
 	aliveCells := make([]util.Cell, 0, p.ImageWidth*p.ImageHeight)
@@ -227,15 +167,16 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 }
 
 //Sends the next state of a slice to the given channel, should be run as goroutine
+
+//the idea here is: append the halos to the slice in the goroutine. then update the middle bit of the slice we need.
+//update the halos at the start of each turn. only send back the middle bit when it's requested.
+//this will still have a performance enhancement as it's all calculated inside the goroutine rather than main func.
 func worker(
 	fullSlice [][]byte,
 	nodeData WorkerNode,
 	onlyWorker bool,
-	turnCompleted chan int,
 	tickerCall chan int,
-	requestBoard chan bool,
 	totalTurns int) {
-	//initialWorldMutex.Lock()
 	currentSlice := fullSlice
 	//Making new slice to write changes to
 	nextSlice := make([][]byte, len(currentSlice))
@@ -243,110 +184,147 @@ func worker(
 		nextSlice[i] = make([]byte, len(currentSlice[0]))
 	}
 	//initialWorldMutex.Unlock()
+	var topHalo []byte
+	var bottomHalo []byte
+
+	bottomHaloToSend := currentSlice[len(currentSlice)-1]
+	topHaloToSend := currentSlice[0]
+	if onlyWorker {
+		topHalo = bottomHaloToSend
+		bottomHalo = topHaloToSend
+	}else {
+		if nodeData.tSendFirst {
+			nodeData.tOut <- topHaloToSend
+			bottomHalo = <-nodeData.bIn
+		} else {
+			bottomHalo = <-nodeData.bIn
+			nodeData.tOut <- topHaloToSend
+		}
+		if nodeData.bSendFirst {
+			nodeData.bOut <- bottomHaloToSend
+			topHalo = <-nodeData.tIn
+		} else {
+			topHalo = <-nodeData.tIn
+			nodeData.bOut <- bottomHaloToSend
+		}
+	}
+	var topHaloDouble [][]byte
+	topHaloDouble = append(topHaloDouble,topHalo)
+	currentSlice = append(topHaloDouble, currentSlice...)
+	currentSlice = append(currentSlice, bottomHalo)
+
 
 	for turn := 0; turn < totalTurns; turn++ {
-		bottomHaloToSend := currentSlice[len(currentSlice)-1]
-		topHaloToSend := currentSlice[0]
-		var topHalo []byte
-		var bottomHalo []byte
+		fmt.Println(turn)
+		bottomTurnHaloToSend := currentSlice[len(currentSlice)-2]
+		topTurnHaloToSend := currentSlice[1]
+
 
 		if onlyWorker {
-			topHalo = bottomHaloToSend
-			bottomHalo = topHaloToSend
+			topHalo = bottomTurnHaloToSend
+			bottomHalo = topTurnHaloToSend
 		}else {
 			if nodeData.tSendFirst {
-				nodeData.tOut <- topHaloToSend
+				nodeData.tOut <- topTurnHaloToSend
 				bottomHalo = <-nodeData.bIn
 			} else {
 				bottomHalo = <-nodeData.bIn
-				nodeData.tOut <- topHaloToSend
+				nodeData.tOut <- topTurnHaloToSend
 			}
 			if nodeData.bSendFirst {
-				nodeData.bOut <- bottomHaloToSend
+				nodeData.bOut <- bottomTurnHaloToSend
 				topHalo = <-nodeData.tIn
 			} else {
 				topHalo = <-nodeData.tIn
-				nodeData.bOut <- bottomHaloToSend
+				nodeData.bOut <- bottomTurnHaloToSend
 			}
 		}
-
-		for i := range currentSlice {
+		for k := 0; k < len(currentSlice[0]); k++	{
+			currentSlice[0][k] = topHalo[k]
+			currentSlice[len(currentSlice) - 1][k] = bottomHalo[k]
+		}
+		fmt.Println(len(currentSlice))
+		for i := 1; i < len(currentSlice) - 2; i++ {
 			for j := range currentSlice[i] {
-				surroundingCells := getNumSurroundingCells(i, j, currentSlice, topHalo, bottomHalo)
+				surroundingCells := getNumSurroundingCells(i, j, currentSlice)
 				if surroundingCells == 3 {
-					nextSlice[i][j] = 0xFF
+					nextSlice[i-1][j] = 0xFF
 				} else if surroundingCells < 2 {
-					nextSlice[i][j] = 0
+					nextSlice[i-1][j] = 0
 				} else if surroundingCells > 3 {
-					nextSlice[i][j] = 0
+					nextSlice[i-1][j] = 0
 				} else if surroundingCells == 2 {
-					nextSlice[i][j] = currentSlice[i][j]
+					nextSlice[i-1][j] = currentSlice[i][j]
 				}
 			}
 		}
+		select {
+			case <- nodeData.requestBoard:
+				nodeData.sliceChannel <- nextSlice
+				for i := 1; i < len(currentSlice) - 2; i++{
+					for j := range currentSlice[i]	{
+						currentSlice[i+1][j] = nextSlice[i][j]
+					}
+				}
+			default:
+				for i := 1; i < len(currentSlice) - 2; i++{
+					for j := range currentSlice[i]	{
+						currentSlice[i][j] = nextSlice[i][j]
+					}
+				}
 
-		nodeData.sliceChannel <- nextSlice
-		currentSlice = nextSlice
+		}
+		turn = <-nodeData.turnComplete
 	}
 }
 
-func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHalo []byte) byte {
-	boundedI := boundNumber(i, len(fullSlice))
-	boundedJ := boundNumber(j, len(fullSlice[boundedI]))
-	if i < 0 {
-		return topHalo[boundedJ]
-	} else if i >= len(fullSlice) {
-		return bottomHalo[boundedJ]
-	} else {
-		return fullSlice[boundedI][boundedJ]
-	}
-}
 
 //count number of active cells surrounding a current cell
-func getNumSurroundingCells(x int, y int, fullSlice [][]byte, topHalo []byte, bottomHalo []byte) int {
+func getNumSurroundingCells(x int, y int, world [][]byte)	int{
 	const ALIVE = 0xFF
 	var counter = 0
 	var succX = x + 1
 	var succY = y + 1
 	var prevX = x - 1
 	var prevY = y - 1
-	/*succX = boundNumber(succX,len(world))
+	succX = boundNumber(succX,len(world) - 2)
 	succY = boundNumber(succY,len(world[0]))
-	prevX = boundNumber(prevX,len(world))
-	prevY = boundNumber(prevY,len(world[0]))*/
-	if getCellWithHalos(prevX, y, fullSlice, topHalo, bottomHalo) == ALIVE {
+	prevX = boundNumber(prevX,len(world) - 2)
+	prevY = boundNumber(prevY,len(world[0]))
+	if world[prevX][y] == ALIVE	{
 		counter++
 	}
-	if getCellWithHalos(prevX, prevY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[prevX][prevY] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(prevX, succY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[prevX][succY] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(x, succY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[x][succY] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(x, prevY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[x][prevY] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(succX, y, fullSlice, topHalo, bottomHalo) == ALIVE {
+
+	if world[succX][y] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(succX, succY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[succX][succY] == ALIVE {
 		counter++
 	}
-	if getCellWithHalos(succX, prevY, fullSlice, topHalo, bottomHalo) == ALIVE {
+	if world[succX][prevY] == ALIVE {
 		counter++
 	}
 	return counter
 }
 
-func boundNumber(num int, worldLen int) int {
+func boundNumber(num int,worldLen int) int{
 	if num < 0 {
 		return num + worldLen
-	} else if num > worldLen-1 {
+	}else if num > worldLen - 1 {
 		return num - worldLen
-	} else {
+	}else{
 		return num
 	}
 }
@@ -371,11 +349,4 @@ func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int
 		Filename:       outFile,
 	}
 
-}
-
-func writeAndQuit(p Params, c distributorChannels, currentWorld [][]byte, turns int) {
-	writeFile(p, c, currentWorld, turns)
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-	c.events <- StateChange{turns, Quitting}
 }
