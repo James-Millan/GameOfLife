@@ -62,9 +62,9 @@ func distributor(p Params, c distributorChannels) {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
 	defer client.Close()
-	ticker := time.NewTicker(2*time.Second)
-	go aliveCellsRetriever(client,c,ticker)
-	go readKeys(c,client,p)
+	ticker := time.NewTicker(2 * time.Second)
+	go aliveCellsRetriever(client, c, ticker)
+	go readKeys(c, client, p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	client.Call(stubs.BrokerRequest, req, resp)
@@ -87,10 +87,10 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func readConfigFile(brokerIp *string){
+func readConfigFile(brokerIp *string) {
 	file, rerr := os.Open("gol/config")
 	if rerr != nil {
-		fmt.Println("Error reading config file: "+rerr.Error())
+		fmt.Println("Error reading config file: " + rerr.Error())
 	}
 	reader := bufio.NewScanner(file)
 	reader.Scan()
@@ -98,7 +98,7 @@ func readConfigFile(brokerIp *string){
 	file.Close()
 }
 
-func readKeys(c distributorChannels,broker *rpc.Client,p Params){
+func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 	for {
 		select {
 		case command := <-c.keyPresses:
@@ -118,7 +118,7 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 				fmt.Println("q")
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
-				broker.Call(stubs.DisconnectController,req,resp)
+				broker.Call(stubs.DisconnectController, req, resp)
 				broker.Close()
 				break
 			case 'p':
@@ -126,10 +126,10 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 				pauseChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.PauseResponse)
-				broker.Call(stubs.TogglePause,req,resp)
+				broker.Call(stubs.TogglePause, req, resp)
 				if resp.Resuming {
 					fmt.Println("Continuing")
-				}else{
+				} else {
 					fmt.Println(resp.Turn)
 				}
 			}
@@ -138,26 +138,26 @@ func readKeys(c distributorChannels,broker *rpc.Client,p Params){
 	}
 }
 
-func getPGMFromServer(broker *rpc.Client,p Params,c distributorChannels){
+func getPGMFromServer(broker *rpc.Client, p Params, c distributorChannels) {
 	req := new(stubs.GenericMessage)
 	resp := new(stubs.PGMResponse)
-	broker.Call(stubs.KeyPressPGM,req,resp)
-	writeFile(p,c,resp.World,resp.Turns)
+	broker.Call(stubs.KeyPressPGM, req, resp)
+	writeFile(p, c, resp.World, resp.Turns)
 }
 
-func aliveCellsRetriever(server *rpc.Client,c distributorChannels,ticker *time.Ticker){
-	for{
-		select{
+func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time.Ticker) {
+	for {
+		select {
 		case <-ticker.C:
 			req := stubs.GenericMessage{}
 			resp := new(stubs.AliveCellsResponse)
-			server.Call(stubs.GetAliveCells,req,resp)
-			c.events <- AliveCellsCount{resp.TurnsCompleted,resp.Cells}
-			case <-pauseChannel:
-				<-pauseChannel
-			case <-killChannel:
-				break
-			default:
+			server.Call(stubs.GetAliveCells, req, resp)
+			c.events <- AliveCellsCount{resp.TurnsCompleted, resp.Cells}
+		case <-pauseChannel:
+			<-pauseChannel
+		case <-killChannel:
+			break
+		default:
 		}
 	}
 }
