@@ -52,7 +52,7 @@ func BenchmarkGol(t *testing.B) {
 	p.Turns = 100
 		for threads := 1; threads <= 16; threads++ {
 			p.Threads = threads
-			testName := fmt.Sprintf("%dx%dx%d-%d", p.ImageWidth, p.ImageHeight, p.Turns, p.Threads)
+			testName := fmt.Sprintf("%dx%d-%d", p.ImageWidth, p.ImageHeight, p.Threads)
 			t.Run(fmt.Sprintf(testName, threads), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					events := make(chan gol.Event)

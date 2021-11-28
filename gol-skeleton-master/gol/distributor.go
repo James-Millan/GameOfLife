@@ -116,6 +116,7 @@ func distributor(p Params, c distributorChannels) {
 						currentWorld[i][j] = nextWorld[i][j]
 					}
 				}
+				turn = turnCounter
 				turnCounter++
 				c.events <- TurnComplete{CompletedTurns: turnCounter}
 		}
