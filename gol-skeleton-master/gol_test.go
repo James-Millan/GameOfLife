@@ -47,7 +47,7 @@ func TestGol(t *testing.T) {
 }
 
 func BenchmarkGol(t *testing.B) {
-	p := gol.Params{ImageWidth: 512, ImageHeight: 512}
+	p := gol.Params{ImageWidth: 5120, ImageHeight: 5120}
 	//os.Stdout = nil
 	p.Turns = 100
 		for threads := 1; threads <= 16; threads++ {
@@ -58,7 +58,12 @@ func BenchmarkGol(t *testing.B) {
 					events := make(chan gol.Event)
 					b.ResetTimer()
 					go gol.Run(p, events, nil)
-					for range events {
+					for event := range events {
+						switch e := event.(type) {
+						case gol.FinalTurnComplete:
+							fmt.Println(e)
+							continue
+						}
 					}
 					}
 				})
