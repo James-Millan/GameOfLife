@@ -14,6 +14,8 @@ import (
 var listener net.Listener
 var workers []string
 var workerClients []*rpc.Client
+var clientChannels []chan [][]uint8
+var safetyChannels []chan bool
 
 var requestingPGM bool
 var PGMChannel chan [][]uint8
@@ -59,10 +61,10 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 	for i := range workerClients {
 		wReq := new(stubs.GenericMessage)
 		wResp := new(stubs.GenericMessage)
-		err := workerClients[i].Call(stubs.KillWorker, wReq, wResp)
-		if err != nil {
+		workerClients[i].Call(stubs.KillWorker, wReq, wResp)
+		/*if err != nil {
 			panic(err)
-		}
+		}*/
 	}
 	err = listener.Close()
 	if err != nil {
@@ -102,37 +104,62 @@ func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage, resp *
 	return
 }
 
-func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
-	var clientChannels []chan [][]uint8
+func attemptConnectWorkers(){
+	if len(workerClients) > 0 {
+		for i := range workerClients{
+			workerClients[i].Close()
+		}
+	}
 	workerClients = []*rpc.Client{}
-	//Creating channels and connections to workers nodes
+	clientChannels = []chan [][]uint8{}
+	safetyChannels = []chan bool{}
 	for i := range workers {
-		fmt.Println(workers[i])
-		newClient, err := rpc.Dial("tcp", workers[i])
-		if err != nil {
-			fmt.Println("Broker dialing error on ", workers[i], " - ", err.Error())
+		fmt.Println("Attempting to connect to worker on ",workers[i])
+		newClient, derr := rpc.Dial("tcp", workers[i])
+		if derr != nil {
+			fmt.Println("Broker dialing error on ", workers[i], " - ", derr.Error())
 		} else {
 			fmt.Println("Broker connected to worker on ", workers[i])
 			workerClients = append(workerClients, newClient)
 			clientChannels = append(clientChannels, make(chan [][]byte))
+			safetyChannels = append(safetyChannels, make(chan bool))
 		}
-		//defer newClient.Close()
 	}
+}
+
+func checkFaults(currentWorld [][]uint8){
+	fault := false
+	for i := range safetyChannels{
+		if <-safetyChannels[i] == false{
+			fault = true
+		}
+	}
+	if fault {
+		fmt.Println("Fault detected, retrying turn")
+		//Cleaning successful channels
+		for i:= range clientChannels {
+			<-clientChannels[i]
+		}
+		attemptConnectWorkers()
+		distributeWorkers(currentWorld)
+		checkFaults(currentWorld)
+	}
+}
+
+func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
+	attemptConnectWorkers()
+	//Creating channels and connections to workers nodes
+
 
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
-	columnsPerChannel := len(currentWorld) / len(workerClients)
 	breakLoop := false
 	for turn := 0; turn < turns; turn++ {
 		var nextWorld [][]byte
 		//Splitting up world and distributing to channels
-		remainders := len(currentWorld) % len(workerClients)
-		offset := 0
-		for sliceNum := 0; sliceNum < len(workerClients); sliceNum++ {
-			go callWorker(clientChannels[sliceNum], workerClients[sliceNum])
-			currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainders, &offset)
-			clientChannels[sliceNum] <- currentSlice
-		}
+		distributeWorkers(currentWorld)
+		//Checking for faults
+		checkFaults(currentWorld)
 		//Reconstructing image from worker channels
 		for i := range clientChannels {
 			nextSlice := <-clientChannels[i]
@@ -204,6 +231,17 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	return
 }
 
+func distributeWorkers(currentWorld [][]byte){
+	columnsPerChannel := len(currentWorld) / len(workerClients)
+	remainders := len(currentWorld) % len(workerClients)
+	offset := 0
+	for sliceNum := 0; sliceNum < len(workerClients); sliceNum++ {
+		go callWorker(clientChannels[sliceNum], workerClients[sliceNum],safetyChannels[sliceNum])
+		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainders, &offset)
+		clientChannels[sliceNum] <- currentSlice
+	}
+}
+
 func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, remainderThreads *int, offset *int) [][]uint8 {
 	var currentSlice [][]uint8
 	//Adding extra column to back of slice to avoid lines of cells that aren't processed
@@ -238,14 +276,17 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 	return counter
 }
 
-func callWorker(channel chan [][]uint8, workerClient *rpc.Client) {
+func callWorker(channel chan [][]uint8, workerClient *rpc.Client,safetyChannel chan bool) {
 	req := stubs.Request{CurrentWorld: <-channel}
 	resp := new(stubs.Response)
 	err := workerClient.Call(stubs.ProcessSlice, req, resp)
 	if err != nil {
-		panic(err)
+		safetyChannel <- false
+		channel <- nil
+	}else {
+		safetyChannel <- true
+		channel <- resp.NextWorld
 	}
-	channel <- resp.NextWorld
 }
 
 func boundNumber(num int, worldLen int) int {

@@ -57,21 +57,22 @@ func distributor(p Params, c distributorChannels) {
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
-	defer func(client *rpc.Client) {
+	/*defer func(client *rpc.Client) {
 		err := client.Close()
 		if err != nil {
 			panic(err)
 		}
-	}(client)
+	}(client)*/
+	defer client.Close()
 	ticker := time.NewTicker(2*time.Second)
 	go aliveCellsRetriever(client,c,ticker)
 	go readKeys(c,client,p)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	err = client.Call(stubs.BrokerRequest, req, resp)
-	if err != nil {
+	/*if err != nil {
 		panic(err)
-	}
+	}*/
 	ticker.Stop()
 	killChannel <- true
 
@@ -118,14 +119,14 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				killChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
-				err := broker.Call(stubs.KillBroker, req, resp)
-				if err != nil {
+				broker.Call(stubs.KillBroker, req, resp)
+				/*if err != nil {
 					panic(err)
-				}
-				err = broker.Close()
-				if err != nil {
+				}*/
+				broker.Close()
+				/*if err != nil {
 					panic(err)
-				}
+				}*/
 			case 'q':
 				fmt.Println("q")
 				req := new(stubs.GenericMessage)
