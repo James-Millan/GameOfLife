@@ -1,6 +1,7 @@
 package gol
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -19,13 +20,16 @@ type distributorChannels struct {
 }
 
 type WorkerNode struct {
-	tIn          chan []byte
-	tOut         chan []byte
-	bIn          chan []byte
-	bOut         chan []byte
-	sliceChannel chan [][]byte
-	bSendFirst   bool
-	tSendFirst   bool
+	tIn                chan []byte
+	tOut               chan []byte
+	bIn                chan []byte
+	bOut               chan []byte
+	sliceChannel       chan [][]byte
+	bSendFirst         bool
+	tSendFirst         bool
+	tickerChannel      chan int
+	turnChannel        chan int
+	synchroniseChannel chan int
 }
 
 var sliceMutex sync.Mutex
@@ -39,8 +43,7 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	killChannel := make(chan bool)
 
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
@@ -62,11 +65,14 @@ func distributor(p Params, c distributorChannels) {
 	currentSendsFirst := false
 	for i := 0; i < p.Threads; i++ {
 		workerNodes[i] = WorkerNode{
-			tOut:         make(chan []byte),
-			bOut:         make(chan []byte),
-			bSendFirst:   currentSendsFirst,
-			tSendFirst:   currentSendsFirst,
-			sliceChannel: make(chan [][]byte),
+			tOut:               make(chan []byte),
+			bOut:               make(chan []byte),
+			bSendFirst:         currentSendsFirst,
+			tSendFirst:         currentSendsFirst,
+			sliceChannel:       make(chan [][]byte),
+			tickerChannel:      make(chan int),
+			turnChannel:        make(chan int),
+			synchroniseChannel: make(chan int),
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
@@ -78,6 +84,7 @@ func distributor(p Params, c distributorChannels) {
 		workerNodes[i].tIn = workerNodes[boundNumber(i-1, len(workerNodes))].bOut
 	}
 
+	go sendTickerCalls(killChannel, workerNodes, c.events)
 	//TODO implement keypress logic.
 
 	// Execute all turns of the Game of Life.
@@ -110,7 +117,7 @@ func distributor(p Params, c distributorChannels) {
 	singleWorker := p.Threads == 1
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], singleWorker, nil, nil, nil, p.Turns, c.events)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker, nil, nil, turns, c.events)
 	}
 	//Reconstructing final image
 	nextWorld := [][]byte{}
@@ -217,18 +224,39 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 	return counter
 }
 
+func sendTickerCalls(killChannel chan bool, workerNodes []WorkerNode, eventsChannel chan<- Event) {
+	ticker := time.NewTicker(2 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			aliveCells := 0
+			var turn int
+			for i := range workerNodes {
+				fmt.Println(turn)
+				workerNodes[i].tickerChannel <- 0
+				aliveCells += <-workerNodes[i].tickerChannel
+				turn = <-workerNodes[i].turnChannel
+			}
+			eventsChannel <- AliveCellsCount{CellsCount: aliveCells, CompletedTurns: turn}
+		default:
+		}
+	}
+}
+
 //Sends the next state of a slice to the given channel, should be run as goroutine
 func worker(
 	fullSlice [][]byte,
 	nodeData WorkerNode,
 	onlyWorker bool,
 	turnCompleted chan int,
-	tickerCall chan int,
 	requestBoard chan bool,
 	totalTurns int,
 	eventsChannel chan<- Event) {
 
 	currentSlice := fullSlice
+	synchronising := false
+	synchronisedTurn := 0
 
 	for turn := 0; turn < totalTurns; turn++ {
 		bottomHaloToSend := currentSlice[len(currentSlice)-1]
@@ -256,6 +284,20 @@ func worker(
 			}
 		}
 
+		select {
+		case <-nodeData.synchroniseChannel:
+			nodeData.synchroniseChannel <- turn
+			synchronisedTurn = <-nodeData.synchroniseChannel
+			synchronising = true
+		default:
+		}
+
+		if synchronising && turn == synchronisedTurn {
+			nodeData.synchroniseChannel <- 0
+			<-nodeData.synchroniseChannel
+			synchronising = false
+		}
+
 		nextSlice := make([][]byte, len(currentSlice))
 		for i := range nextSlice {
 			nextSlice[i] = make([]byte, len(currentSlice[0]))
@@ -277,6 +319,12 @@ func worker(
 				}
 			}
 		}
+		select {
+		case <-nodeData.tickerChannel:
+			nodeData.tickerChannel <- getAliveCellsCount(currentSlice)
+			nodeData.turnChannel <- turn
+		default:
+		}
 		currentSlice = nextSlice
 	}
 	nodeData.sliceChannel <- currentSlice
@@ -291,6 +339,30 @@ func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHa
 		return bottomHalo[boundedJ]
 	} else {
 		return fullSlice[boundedI][boundedJ]
+	}
+}
+
+func synchronise(workerNodes []WorkerNode) {
+	//Establishing turn to sync on
+	latestTurn := 0
+	for i := range workerNodes {
+		workerNodes[i].synchroniseChannel <- 0
+		t := <-workerNodes[i].synchroniseChannel
+		if t > latestTurn {
+			latestTurn = t
+		}
+	}
+	//Sending turn to sync on for all workers
+	for i := range workerNodes {
+		workerNodes[i].synchroniseChannel <- latestTurn
+	}
+	//Suspending until workers synchronised
+	for i := range workerNodes {
+		<-workerNodes[i].synchroniseChannel
+	}
+	//Unsuspending workers
+	for i := range workerNodes {
+		workerNodes[i].synchroniseChannel <- 0
 	}
 }
 
