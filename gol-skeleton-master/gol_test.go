@@ -47,9 +47,10 @@ func TestGol(t *testing.T) {
 }
 
 func BenchmarkGol(t *testing.B) {
-	p := gol.Params{ImageWidth: 5120, ImageHeight: 5120}
+	p := gol.Params{ImageWidth: 512, ImageHeight: 512}
 	//os.Stdout = nil
-	p.Turns = 100
+	
+	p.Turns = 1000
 		for threads := 1; threads <= 16; threads++ {
 			p.Threads = threads
 			testName := fmt.Sprintf("%dx%d-%d", p.ImageWidth, p.ImageHeight, p.Threads)
@@ -63,6 +64,8 @@ func BenchmarkGol(t *testing.B) {
 						case gol.FinalTurnComplete:
 							fmt.Println(e)
 							continue
+						default:
+
 						}
 					}
 					}
