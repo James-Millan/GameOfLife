@@ -28,10 +28,11 @@ type WorkerNode struct {
 	tSendFirst bool
 }
 
-var initialWorldMutex sync.Mutex
+var sliceMutex sync.Mutex
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+	sliceMutex = sync.Mutex{}
 	//Create a 2D slice to store the world
 	currentWorld := make([][]byte, p.ImageWidth)
 	for i := 0; i < p.ImageWidth; i++ {
@@ -69,7 +70,7 @@ func distributor(p Params, c distributorChannels) {
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
-	if p.Threads % 2 == 1 {
+	if p.Threads % 2 != 0 {
 		workerNodes[len(workerNodes) - 1].bSendFirst = !workerNodes[len(workerNodes) - 1].bSendFirst
 	}
 	for i := range workerNodes {
@@ -198,7 +199,6 @@ func distributor(p Params, c distributorChannels) {
 //Helper function for splitting the world into slices
 func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, remainderThreads *int, offset *int) [][]byte {
 	currentSlice := [][]byte{}
-	//Adding extra column to back of slice to avoid lines of cells that aren't processed
 	for i := 0; i < columnsPerChannel; i++ {
 		currentSlice = append(currentSlice, currentWorld[boundNumber(sliceNum*columnsPerChannel+i+*offset, len(currentWorld))])
 	}
@@ -209,7 +209,6 @@ func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, rema
 			currentWorld[boundNumber(sliceNum*columnsPerChannel+columnsPerChannel+*offset, len(currentWorld))])
 		*offset += 1
 	}
-	//Adding extra column to front of slice to avoid lines of cells that aren't processed
 	return currentSlice
 }
 
@@ -235,14 +234,8 @@ func worker(
 	tickerCall chan int,
 	requestBoard chan bool,
 	totalTurns int) {
-	//initialWorldMutex.Lock()
+
 	currentSlice := fullSlice
-	//Making new slice to write changes to
-	nextSlice := make([][]byte, len(currentSlice))
-	for i := range nextSlice {
-		nextSlice[i] = make([]byte, len(currentSlice[0]))
-	}
-	//initialWorldMutex.Unlock()
 
 	for turn := 0; turn < totalTurns; turn++ {
 		bottomHaloToSend := currentSlice[len(currentSlice)-1]
@@ -270,6 +263,10 @@ func worker(
 			}
 		}
 
+		nextSlice := make([][]byte, len(currentSlice))
+		for i := range nextSlice {
+			nextSlice[i] = make([]byte, len(currentSlice[0]))
+		}
 		for i := range currentSlice {
 			for j := range currentSlice[i] {
 				surroundingCells := getNumSurroundingCells(i, j, currentSlice, topHalo, bottomHalo)
