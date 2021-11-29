@@ -24,8 +24,8 @@ type WorkerNode struct {
 	bIn          chan []byte
 	bOut         chan []byte
 	sliceChannel chan [][]byte
-	bSendFirst bool
-	tSendFirst bool
+	bSendFirst   bool
+	tSendFirst   bool
 }
 
 var sliceMutex sync.Mutex
@@ -62,16 +62,16 @@ func distributor(p Params, c distributorChannels) {
 	currentSendsFirst := false
 	for i := 0; i < p.Threads; i++ {
 		workerNodes[i] = WorkerNode{
-			tOut: make(chan []byte),
-			bOut: make(chan []byte),
+			tOut:         make(chan []byte),
+			bOut:         make(chan []byte),
+			bSendFirst:   currentSendsFirst,
+			tSendFirst:   currentSendsFirst,
 			sliceChannel: make(chan [][]byte),
-			bSendFirst: currentSendsFirst,
-			tSendFirst: currentSendsFirst,
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
-	if p.Threads % 2 != 0 {
-		workerNodes[len(workerNodes) - 1].bSendFirst = !workerNodes[len(workerNodes) - 1].bSendFirst
+	if p.Threads%2 != 0 {
+		workerNodes[len(workerNodes)-1].bSendFirst = !workerNodes[len(workerNodes)-1].bSendFirst
 	}
 	for i := range workerNodes {
 		workerNodes[i].bIn = workerNodes[boundNumber(i+1, len(workerNodes))].tOut
@@ -110,26 +110,18 @@ func distributor(p Params, c distributorChannels) {
 	singleWorker := p.Threads == 1
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], singleWorker,nil, nil, nil, p.Turns)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker, nil, nil, nil, p.Turns, c.events)
 	}
-	//Reconstructing image from worker channels
-	for turn := 0; turn < p.Turns; turn++ {
-		nextWorld := [][]byte{}
-		for i := range workerNodes {
-			nextSlice := <-workerNodes[i].sliceChannel
-			for j := range nextSlice {
-				nextWorld = append(nextWorld, nextSlice[j])
-			}
-		}
-		for i := range currentWorld {
-			for j := range currentWorld[i] {
-				if currentWorld[i][j] != nextWorld[i][j] {
-					c.events <- CellFlipped{Cell: util.Cell{X: i, Y: j}, CompletedTurns: turns}
-				}
-				currentWorld[i][j] = nextWorld[i][j]
-			}
+	//Reconstructing final image
+	nextWorld := [][]byte{}
+	for i := range workerNodes {
+		nextSlice := <-workerNodes[i].sliceChannel
+		for j := range nextSlice {
+			nextWorld = append(nextWorld, nextSlice[j])
 		}
 	}
+	currentWorld = nextWorld
+
 	/*select {
 	case <-ticker.C:
 		cells := getAliveCellsCount(currentWorld)
@@ -233,7 +225,8 @@ func worker(
 	turnCompleted chan int,
 	tickerCall chan int,
 	requestBoard chan bool,
-	totalTurns int) {
+	totalTurns int,
+	eventsChannel chan<- Event) {
 
 	currentSlice := fullSlice
 
@@ -246,7 +239,7 @@ func worker(
 		if onlyWorker {
 			topHalo = bottomHaloToSend
 			bottomHalo = topHaloToSend
-		}else {
+		} else {
 			if nodeData.tSendFirst {
 				nodeData.tOut <- topHaloToSend
 				bottomHalo = <-nodeData.bIn
@@ -279,12 +272,14 @@ func worker(
 				} else if surroundingCells == 2 {
 					nextSlice[i][j] = currentSlice[i][j]
 				}
+				if nextSlice[i][j] != currentSlice[i][j] {
+					eventsChannel <- CellFlipped{Cell: util.Cell{X: i, Y: j}, CompletedTurns: turn}
+				}
 			}
 		}
-
-		nodeData.sliceChannel <- nextSlice
 		currentSlice = nextSlice
 	}
+	nodeData.sliceChannel <- currentSlice
 }
 
 func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHalo []byte) byte {
@@ -307,10 +302,6 @@ func getNumSurroundingCells(x int, y int, fullSlice [][]byte, topHalo []byte, bo
 	var succY = y + 1
 	var prevX = x - 1
 	var prevY = y - 1
-	/*succX = boundNumber(succX,len(world))
-	succY = boundNumber(succY,len(world[0]))
-	prevX = boundNumber(prevX,len(world))
-	prevY = boundNumber(prevY,len(world[0]))*/
 	if getCellWithHalos(prevX, y, fullSlice, topHalo, bottomHalo) == ALIVE {
 		counter++
 	}
