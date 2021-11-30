@@ -233,7 +233,7 @@ func sendTickerCalls(killChannel chan bool, workerNodes []WorkerNode, eventsChan
 			aliveCells := 0
 			var turn int
 			for i := range workerNodes {
-				fmt.Println(turn)
+				synchronise(workerNodes)
 				workerNodes[i].tickerChannel <- 0
 				aliveCells += <-workerNodes[i].tickerChannel
 				turn = <-workerNodes[i].turnChannel
@@ -296,6 +296,7 @@ func worker(
 			nodeData.synchroniseChannel <- 0
 			<-nodeData.synchroniseChannel
 			synchronising = false
+			fmt.Println("synced on turn ",turn)
 		}
 
 		nextSlice := make([][]byte, len(currentSlice))
@@ -319,12 +320,12 @@ func worker(
 				}
 			}
 		}
-		select {
+		/*select {
 		case <-nodeData.tickerChannel:
 			nodeData.tickerChannel <- getAliveCellsCount(currentSlice)
 			nodeData.turnChannel <- turn
 		default:
-		}
+		}*/
 		currentSlice = nextSlice
 	}
 	nodeData.sliceChannel <- currentSlice
@@ -346,11 +347,13 @@ func synchronise(workerNodes []WorkerNode) {
 	//Establishing turn to sync on
 	latestTurn := 0
 	for i := range workerNodes {
+		fmt.Println(workerNodes[i].synchroniseChannel)
 		workerNodes[i].synchroniseChannel <- 0
 		t := <-workerNodes[i].synchroniseChannel
 		if t > latestTurn {
 			latestTurn = t
 		}
+
 	}
 	//Sending turn to sync on for all workers
 	for i := range workerNodes {
