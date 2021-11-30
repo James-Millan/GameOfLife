@@ -1,15 +1,15 @@
 	package gol
 
-import (
-	"bufio"
-	"fmt"
-	"net/rpc"
-	"os"
-	"strconv"
-	"time"
+	import (
+		"bufio"
+		"fmt"
+		"net/rpc"
+		"os"
+		"strconv"
+		"time"
 
-	"uk.ac.bris.cs/gameoflife/stubs"
-)
+		"uk.ac.bris.cs/gameoflife/stubs"
+	)
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -21,6 +21,7 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
+var recieverKilled bool
 var killChannel chan bool
 var pauseChannel chan bool
 
@@ -29,6 +30,7 @@ func distributor(p Params, c distributorChannels) {
 	killChannel = make(chan bool)
 	pauseChannel = make(chan bool)
 	var brokerIp string
+	recieverKilled = false
 	readConfigFile(&brokerIp)
 
 	//Create a 2D slice to store the world
@@ -74,7 +76,9 @@ func distributor(p Params, c distributorChannels) {
 		fmt.Println(err)
 	}*/
 	ticker.Stop()
-	killChannel <- true
+	if !recieverKilled {
+		killChannel <- true
+	}
 
 	//Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
@@ -106,6 +110,7 @@ func readConfigFile(brokerIp *string) {
 }
 
 func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
+	breakLoop := false
 	for {
 		select {
 		case command := <-c.keyPresses:
@@ -117,6 +122,7 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				fmt.Println("k")
 				getPGMFromServer(broker, p, c)
 				killChannel <- true
+				recieverKilled = true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
 				broker.Call(stubs.KillBroker, req, resp)
@@ -127,6 +133,7 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				/*if err != nil {
 					fmt.Println(err)
 				}*/
+				breakLoop = true
 			case 'q':
 				fmt.Println("q")
 				req := new(stubs.GenericMessage)
@@ -139,7 +146,7 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				if err != nil {
 					fmt.Println(err)
 				}
-				break
+				breakLoop = true
 			case 'p':
 				fmt.Println("p")
 				pauseChannel <- true
@@ -157,6 +164,9 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 			}
 		default:
 		}
+		if breakLoop {
+			break
+		}
 	}
 }
 
@@ -171,6 +181,7 @@ func getPGMFromServer(broker *rpc.Client, p Params, c distributorChannels) {
 }
 
 func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time.Ticker) {
+	breakLoop := false
 	for {
 		select {
 		case <-ticker.C:
@@ -185,8 +196,11 @@ func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time
 			case <-pauseChannel:
 				<-pauseChannel
 			case <-killChannel:
-				break
+				breakLoop = true
 			default:
+		}
+		if breakLoop {
+			break
 		}
 	}
 }
