@@ -30,6 +30,10 @@ type WorkerNode struct {
 	tickerChannel      chan int
 	turnChannel        chan int
 	synchroniseChannel chan int
+	tTokenIn chan bool
+	bTokenIn chan bool
+	tTokenOut chan bool
+	bTokenOut chan bool
 }
 
 var sliceMutex sync.Mutex
@@ -73,6 +77,8 @@ func distributor(p Params, c distributorChannels) {
 			tickerChannel:      make(chan int),
 			turnChannel:        make(chan int),
 			synchroniseChannel: make(chan int),
+			tTokenOut: make(chan bool),
+			bTokenOut: make(chan bool),
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
@@ -82,6 +88,8 @@ func distributor(p Params, c distributorChannels) {
 	for i := range workerNodes {
 		workerNodes[i].bIn = workerNodes[boundNumber(i+1, len(workerNodes))].tOut
 		workerNodes[i].tIn = workerNodes[boundNumber(i-1, len(workerNodes))].bOut
+		workerNodes[i].bTokenIn = workerNodes[boundNumber(i+1, len(workerNodes))].tTokenOut
+		workerNodes[i].tTokenIn = workerNodes[boundNumber(i-1, len(workerNodes))].bTokenOut
 	}
 
 	go sendTickerCalls(killChannel, workerNodes, c.events)
@@ -232,12 +240,12 @@ func sendTickerCalls(killChannel chan bool, workerNodes []WorkerNode, eventsChan
 		case <-ticker.C:
 			aliveCells := 0
 			var turn int
-			for i := range workerNodes {
-				synchronise(workerNodes)
+			synchronise(workerNodes)
+			/*for i := range workerNodes {
 				workerNodes[i].tickerChannel <- 0
 				aliveCells += <-workerNodes[i].tickerChannel
 				turn = <-workerNodes[i].turnChannel
-			}
+			}*/
 			eventsChannel <- AliveCellsCount{CellsCount: aliveCells, CompletedTurns: turn}
 		default:
 		}
@@ -255,8 +263,8 @@ func worker(
 	eventsChannel chan<- Event) {
 
 	currentSlice := fullSlice
-	synchronising := false
-	synchronisedTurn := 0
+	//synchronising := false
+	//synchronisedTurn := 0
 
 	for turn := 0; turn < totalTurns; turn++ {
 		bottomHaloToSend := currentSlice[len(currentSlice)-1]
@@ -287,17 +295,17 @@ func worker(
 		select {
 		case <-nodeData.synchroniseChannel:
 			nodeData.synchroniseChannel <- turn
-			synchronisedTurn = <-nodeData.synchroniseChannel
-			synchronising = true
+			//synchronisedTurn = <-nodeData.synchroniseChannel
+			//synchronising = true
 		default:
 		}
 
-		if synchronising && turn == synchronisedTurn {
+		/*if synchronising && turn == synchronisedTurn {
 			nodeData.synchroniseChannel <- 0
 			<-nodeData.synchroniseChannel
 			synchronising = false
 			fmt.Println("synced on turn ",turn)
-		}
+		}*/
 
 		nextSlice := make([][]byte, len(currentSlice))
 		for i := range nextSlice {
@@ -345,16 +353,16 @@ func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHa
 
 func synchronise(workerNodes []WorkerNode) {
 	//Establishing turn to sync on
-	latestTurn := 0
+	//latestTurn := 0
 	for i := range workerNodes {
-		fmt.Println(workerNodes[i].synchroniseChannel)
 		workerNodes[i].synchroniseChannel <- 0
 		t := <-workerNodes[i].synchroniseChannel
-		if t > latestTurn {
+		fmt.Println(workerNodes[i].bSendFirst," ",t)
+		/*if t > latestTurn {
 			latestTurn = t
-		}
-
+		}*/
 	}
+	/*
 	//Sending turn to sync on for all workers
 	for i := range workerNodes {
 		workerNodes[i].synchroniseChannel <- latestTurn
@@ -366,7 +374,7 @@ func synchronise(workerNodes []WorkerNode) {
 	//Unsuspending workers
 	for i := range workerNodes {
 		workerNodes[i].synchroniseChannel <- 0
-	}
+	}*/
 }
 
 //count number of active cells surrounding a current cell
