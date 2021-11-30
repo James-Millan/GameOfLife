@@ -23,15 +23,15 @@ func main() {
 	subResp := new(stubs.GenericMessage)
 	err := subscriber.Call(stubs.SubscribeWorker, subRequest, subResp)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	err = subscriber.Close()
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	err = rpc.Register(&WorkerOperations{})
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 
 	listener, err = net.Listen("tcp", ":"+*port)
@@ -46,7 +46,7 @@ type WorkerOperations struct{}
 func (w *WorkerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMessage) (err error){
 	err = listener.Close()
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	return
 }

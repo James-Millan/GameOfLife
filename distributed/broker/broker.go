@@ -63,12 +63,12 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 		wResp := new(stubs.GenericMessage)
 		workerClients[i].Call(stubs.KillWorker, wReq, wResp)
 		/*if err != nil {
-			panic(err)
+			fmt.Println(err)
 		}*/
 	}
 	err = listener.Close()
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	return
 }
@@ -320,7 +320,7 @@ func main() {
 	stopCallChannel = make(chan bool)
 	err := rpc.Register(&BrokerOperations{})
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	port := flag.String("port","8040","Port broker will listen on")
 	flag.Parse()

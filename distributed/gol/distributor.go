@@ -60,7 +60,7 @@ func distributor(p Params, c distributorChannels) {
 	/*defer func(client *rpc.Client) {
 		err := client.Close()
 		if err != nil {
-			panic(err)
+			fmt.Println(err)
 		}
 	}(client)*/
 	defer client.Close()
@@ -71,7 +71,7 @@ func distributor(p Params, c distributorChannels) {
 	resp := new(stubs.Response)
 	err = client.Call(stubs.BrokerRequest, req, resp)
 	/*if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}*/
 	ticker.Stop()
 	killChannel <- true
@@ -101,7 +101,7 @@ func readConfigFile(brokerIp *string) {
 	*brokerIp = reader.Text()
 	err := file.Close()
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 }
 
@@ -121,11 +121,11 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				resp := new(stubs.GenericMessage)
 				broker.Call(stubs.KillBroker, req, resp)
 				/*if err != nil {
-					panic(err)
+					fmt.Println(err)
 				}*/
 				broker.Close()
 				/*if err != nil {
-					panic(err)
+					fmt.Println(err)
 				}*/
 			case 'q':
 				fmt.Println("q")
@@ -133,11 +133,11 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				resp := new(stubs.GenericMessage)
 				err := broker.Call(stubs.DisconnectController, req, resp)
 				if err != nil {
-					panic(err)
+					fmt.Println(err)
 				}
 				err = broker.Close()
 				if err != nil {
-					panic(err)
+					fmt.Println(err)
 				}
 				break
 			case 'p':
@@ -147,7 +147,7 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				resp := new(stubs.PauseResponse)
 				err := broker.Call(stubs.TogglePause, req, resp)
 				if err != nil {
-					panic(err)
+					fmt.Println(err)
 				}
 				if resp.Resuming {
 					fmt.Println("Continuing")
@@ -165,7 +165,7 @@ func getPGMFromServer(broker *rpc.Client, p Params, c distributorChannels) {
 	resp := new(stubs.PGMResponse)
 	err := broker.Call(stubs.KeyPressPGM, req, resp)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	writeFile(p, c, resp.World, resp.Turns)
 }
@@ -179,7 +179,7 @@ func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time
 
 			err := server.Call(stubs.GetAliveCells, req, resp)
 			if err != nil {
-				panic(err)
+				fmt.Println(err)
 			}
 			c.events <- AliveCellsCount{resp.TurnsCompleted,resp.Cells}
 			case <-pauseChannel:
