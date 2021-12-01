@@ -6,6 +6,7 @@
 		"net/rpc"
 		"os"
 		"strconv"
+		"sync"
 		"time"
 
 		"uk.ac.bris.cs/gameoflife/stubs"
@@ -21,16 +22,16 @@ type distributorChannels struct {
 	keyPresses <-chan rune
 }
 
-var recieverKilled bool
+var eventsRoutineKilled bool
+var killLock sync.Mutex
 var killChannel chan bool
-var pauseChannel chan bool
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+	eventsRoutineKilled = false
+	killLock = sync.Mutex{}
 	killChannel = make(chan bool)
-	pauseChannel = make(chan bool)
 	var brokerIp string
-	recieverKilled = false
 	readConfigFile(&brokerIp)
 
 	//Create a 2D slice to store the world
@@ -67,8 +68,7 @@ func distributor(p Params, c distributorChannels) {
 	}(client)*/
 	defer client.Close()
 	ticker := time.NewTicker(2*time.Second)
-	go aliveCellsRetriever(client,c,ticker)
-	go readKeys(c,client,p)
+	go eventsRoutine(client,p,c,ticker)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	err = client.Call(stubs.BrokerRequest, req, resp)
@@ -76,9 +76,12 @@ func distributor(p Params, c distributorChannels) {
 		fmt.Println(err)
 	}*/
 	ticker.Stop()
-	if !recieverKilled {
+	killLock.Lock()
+	if(!eventsRoutineKilled){
 		killChannel <- true
+		<-killChannel
 	}
+	killLock.Unlock()
 
 	//Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
@@ -109,8 +112,9 @@ func readConfigFile(brokerIp *string) {
 	}
 }
 
-func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
-	breakLoop := false
+func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *time.Ticker){
+	breakloop := false
+	paused := false
 	for {
 		select {
 		case command := <-c.keyPresses:
@@ -121,8 +125,9 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 			case 'k':
 				fmt.Println("k")
 				getPGMFromServer(broker, p, c)
-				killChannel <- true
-				recieverKilled = true
+				killLock.Lock()
+				eventsRoutineKilled = true
+				killLock.Unlock()
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
 				broker.Call(stubs.KillBroker, req, resp)
@@ -133,9 +138,13 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				/*if err != nil {
 					fmt.Println(err)
 				}*/
-				breakLoop = true
+				breakloop = true
+
 			case 'q':
 				fmt.Println("q")
+				killLock.Lock()
+				eventsRoutineKilled = true
+				killLock.Unlock()
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
 				err := broker.Call(stubs.DisconnectController, req, resp)
@@ -146,10 +155,9 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				if err != nil {
 					fmt.Println(err)
 				}
-				breakLoop = true
+				breakloop = true
 			case 'p':
 				fmt.Println("p")
-				pauseChannel <- true
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.PauseResponse)
 				err := broker.Call(stubs.TogglePause, req, resp)
@@ -158,13 +166,30 @@ func readKeys(c distributorChannels, broker *rpc.Client, p Params) {
 				}
 				if resp.Resuming {
 					fmt.Println("Continuing")
+					paused = false
 				} else {
 					fmt.Println(resp.Turn)
+					paused = true
 				}
 			}
+		case <-ticker.C:
+			if(!paused) {
+				req := stubs.GenericMessage{}
+				resp := new(stubs.AliveCellsResponse)
+				err := broker.Call(stubs.GetAliveCells, req, resp)
+				if err != nil {
+					fmt.Println(err)
+				}
+				c.events <- AliveCellsCount{resp.TurnsCompleted, resp.Cells}
+			}
+			case <-killChannel:
+				breakloop = true
 		default:
 		}
-		if breakLoop {
+		if breakloop {
+			if(!eventsRoutineKilled){
+				killChannel <- true
+			}
 			break
 		}
 	}
@@ -178,31 +203,6 @@ func getPGMFromServer(broker *rpc.Client, p Params, c distributorChannels) {
 		fmt.Println(err)
 	}
 	writeFile(p, c, resp.World, resp.Turns)
-}
-
-func aliveCellsRetriever(server *rpc.Client, c distributorChannels, ticker *time.Ticker) {
-	breakLoop := false
-	for {
-		select {
-		case <-ticker.C:
-			req := stubs.GenericMessage{}
-			resp := new(stubs.AliveCellsResponse)
-
-			err := server.Call(stubs.GetAliveCells, req, resp)
-			if err != nil {
-				fmt.Println(err)
-			}
-			c.events <- AliveCellsCount{resp.TurnsCompleted,resp.Cells}
-			case <-pauseChannel:
-				<-pauseChannel
-			case <-killChannel:
-				breakLoop = true
-			default:
-		}
-		if breakLoop {
-			break
-		}
-	}
 }
 
 func writeFile(p Params, c distributorChannels, currentWorld [][]byte, turns int) {
