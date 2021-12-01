@@ -23,7 +23,6 @@ var PGMChannel chan [][]uint8
 var paused bool
 var pauseChannel chan bool
 var turnChannel chan int
-var cellsChannel chan int
 
 var pgmMutex sync.Mutex
 var killMutex sync.Mutex
@@ -31,6 +30,10 @@ var killMutex sync.Mutex
 var requestingShutdown bool
 var shutdownChannel chan bool
 var stopCallChannel chan bool
+
+var aliveCellsToSend int
+var turnToSend int
+var tickerMutex sync.Mutex
 
 type BrokerOperations struct{}
 
@@ -93,9 +96,10 @@ func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGM
 }*/
 
 func (b *BrokerOperations) GetAliveCells(req stubs.GenericMessage, resp *stubs.AliveCellsResponse) (err error) {
-	cellsChannel <- 0
-	resp.Cells = <-cellsChannel
-	resp.TurnsCompleted = <-turnChannel
+	tickerMutex.Lock()
+	resp.Cells = aliveCellsToSend
+	resp.TurnsCompleted = turnToSend
+	tickerMutex.Unlock()
 	return
 }
 
@@ -176,12 +180,7 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 			fmt.Println("sent")
 		default:
 		}*/
-		select {
-		case <-cellsChannel:
-			cellsChannel <- getAliveCellsCount(currentWorld)
-			turnChannel <- turn
-		default:
-		}
+
 		pgmMutex.Lock()
 		if requestingPGM {
 			PGMChannel <- currentWorld
@@ -210,6 +209,10 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 			breakLoop = true
 		default:
 		}
+		tickerMutex.Lock()
+		aliveCellsToSend = getAliveCellsCount(currentWorld)
+		turnToSend = turn
+		tickerMutex.Unlock()
 		if breakLoop {
 			break
 		}
@@ -316,8 +319,10 @@ func main() {
 	pauseChannel = make(chan bool)
 	shutdownChannel = make(chan bool)
 	turnChannel = make(chan int)
-	cellsChannel = make(chan int)
 	stopCallChannel = make(chan bool)
+	tickerMutex = sync.Mutex{}
+	turnToSend = 0
+	aliveCellsToSend = 0
 	err := rpc.Register(&BrokerOperations{})
 	if err != nil {
 		fmt.Println(err)

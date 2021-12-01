@@ -25,11 +25,15 @@ type distributorChannels struct {
 var eventsRoutineKilled bool
 var killLock sync.Mutex
 var killChannel chan bool
+var channelClosedLock sync.Mutex
+var eventsChannelClosed bool
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	eventsRoutineKilled = false
+	eventsChannelClosed = false
 	killLock = sync.Mutex{}
+	channelClosedLock = sync.Mutex{}
 	killChannel = make(chan bool)
 	var brokerIp string
 	readConfigFile(&brokerIp)
@@ -95,7 +99,10 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{turns, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	channelClosedLock.Lock()
+	eventsChannelClosed = true
 	close(c.events)
+	channelClosedLock.Unlock()
 }
 
 func readConfigFile(brokerIp *string) {
@@ -180,7 +187,11 @@ func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *ti
 				if err != nil {
 					fmt.Println(err)
 				}
-				c.events <- AliveCellsCount{resp.TurnsCompleted, resp.Cells}
+				channelClosedLock.Lock()
+				if !eventsChannelClosed {
+					c.events <- AliveCellsCount{resp.TurnsCompleted, resp.Cells}
+				}
+				channelClosedLock.Unlock()
 			}
 			case <-killChannel:
 				breakloop = true
