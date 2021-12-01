@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -27,13 +26,12 @@ type WorkerNode struct {
 	sliceChannel       chan [][]byte
 	bSendFirst         bool
 	tSendFirst         bool
-	tickerChannel      chan int
 	turnChannel        chan int
+	cellsChannel chan int
 	synchroniseChannel chan int
-	tTokenIn chan bool
-	bTokenIn chan bool
-	tTokenOut chan bool
-	bTokenOut chan bool
+	pgmChannel chan [][]byte
+	pauseChannel chan bool
+	killChannel chan bool
 }
 
 var sliceMutex sync.Mutex
@@ -47,7 +45,7 @@ func distributor(p Params, c distributorChannels) {
 		currentWorld[i] = make([]byte, p.ImageHeight)
 	}
 
-	killChannel := make(chan bool)
+	//killChannel := make(chan bool)
 
 	//TODO read in initial state of GOL using io.go
 	width := strconv.Itoa(p.ImageWidth)
@@ -74,11 +72,12 @@ func distributor(p Params, c distributorChannels) {
 			bSendFirst:         currentSendsFirst,
 			tSendFirst:         currentSendsFirst,
 			sliceChannel:       make(chan [][]byte),
-			tickerChannel:      make(chan int),
 			turnChannel:        make(chan int),
 			synchroniseChannel: make(chan int),
-			tTokenOut: make(chan bool),
-			bTokenOut: make(chan bool),
+			cellsChannel: make(chan int),
+			pgmChannel: make(chan [][]byte),
+			pauseChannel: make(chan bool),
+			killChannel: make(chan bool),
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
@@ -88,11 +87,8 @@ func distributor(p Params, c distributorChannels) {
 	for i := range workerNodes {
 		workerNodes[i].bIn = workerNodes[boundNumber(i+1, len(workerNodes))].tOut
 		workerNodes[i].tIn = workerNodes[boundNumber(i-1, len(workerNodes))].bOut
-		workerNodes[i].bTokenIn = workerNodes[boundNumber(i+1, len(workerNodes))].tTokenOut
-		workerNodes[i].tTokenIn = workerNodes[boundNumber(i-1, len(workerNodes))].bTokenOut
 	}
-
-	go sendTickerCalls(killChannel, workerNodes, c.events)
+	ticker := time.NewTicker(2 * time.Second)
 	//TODO implement keypress logic.
 
 	// Execute all turns of the Game of Life.
@@ -123,9 +119,70 @@ func distributor(p Params, c distributorChannels) {
 	remainderThreads := len(currentWorld) % p.Threads
 	offset := 0
 	singleWorker := p.Threads == 1
+	cellFlipOffset := 0
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], singleWorker, nil, nil, turns, c.events)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker, turns, c.events,cellFlipOffset)
+		cellFlipOffset += len(currentSlice)
+	}
+
+	breakLoop := false
+	for turn := 0;turn < p.Turns;turn++{
+		syncedTurn := 0
+		for w := range workerNodes{
+			syncedTurn = <-workerNodes[w].synchroniseChannel
+		}
+		c.events <- TurnComplete{syncedTurn}
+		select {
+		case <-ticker.C:
+			aliveCells := 0
+			for i := range workerNodes{
+				workerNodes[i].cellsChannel <- 0
+				aliveCells += <-workerNodes[i].cellsChannel
+			}
+			c.events <- AliveCellsCount{CellsCount: aliveCells,CompletedTurns: syncedTurn}
+			case key := <-c.keyPresses:
+				switch key {
+				case 's':
+					imageToWrite := [][]byte{}
+					for i := range workerNodes{
+						workerNodes[i].pgmChannel <- nil
+						imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
+					}
+					writeFile(p,c,imageToWrite,syncedTurn)
+				case 'p':
+					fmt.Println(syncedTurn)
+					for i := range workerNodes{
+						workerNodes[i].pauseChannel <- true
+					}
+					for{
+						resumeKey := <-c.keyPresses
+						if resumeKey == 'p'{
+							fmt.Println("continuing")
+							break
+						}
+					}
+					for i := range workerNodes{
+						workerNodes[i].pauseChannel <- true
+					}
+				case 'q':
+					breakLoop = true
+					imageToWrite := [][]byte{}
+					for i := range workerNodes{
+						workerNodes[i].killChannel <- true
+						imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
+					}
+					writeAndQuit(p,c,imageToWrite,syncedTurn)
+				}
+
+		default:
+			for i := range workerNodes{
+				workerNodes[i].synchroniseChannel <- 0
+			}
+		}
+		if breakLoop {
+			break
+		}
 	}
 	//Reconstructing final image
 	nextWorld := [][]byte{}
@@ -203,6 +260,15 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
+func getPgmFromWorkers(workerNodes []WorkerNode) [][]byte{
+	imageToWrite := [][]byte{}
+	for i := range workerNodes{
+		workerNodes[i].pgmChannel <- nil
+		imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
+	}
+	return imageToWrite
+}
+
 //Helper function for splitting the world into slices
 func sliceWorld(sliceNum int, columnsPerChannel int, currentWorld [][]byte, remainderThreads *int, offset *int) [][]byte {
 	currentSlice := [][]byte{}
@@ -232,35 +298,14 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 	return counter
 }
 
-func sendTickerCalls(killChannel chan bool, workerNodes []WorkerNode, eventsChannel chan<- Event) {
-	ticker := time.NewTicker(2 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			aliveCells := 0
-			var turn int
-			synchronise(workerNodes)
-			/*for i := range workerNodes {
-				workerNodes[i].tickerChannel <- 0
-				aliveCells += <-workerNodes[i].tickerChannel
-				turn = <-workerNodes[i].turnChannel
-			}*/
-			eventsChannel <- AliveCellsCount{CellsCount: aliveCells, CompletedTurns: turn}
-		default:
-		}
-	}
-}
-
 //Sends the next state of a slice to the given channel, should be run as goroutine
 func worker(
 	fullSlice [][]byte,
 	nodeData WorkerNode,
 	onlyWorker bool,
-	turnCompleted chan int,
-	requestBoard chan bool,
 	totalTurns int,
-	eventsChannel chan<- Event) {
+	eventsChannel chan<- Event,
+	cellFlipOffset int) {
 
 	currentSlice := fullSlice
 	//synchronising := false
@@ -292,21 +337,6 @@ func worker(
 			}
 		}
 
-		select {
-		case <-nodeData.synchroniseChannel:
-			nodeData.synchroniseChannel <- turn
-			//synchronisedTurn = <-nodeData.synchroniseChannel
-			//synchronising = true
-		default:
-		}
-
-		/*if synchronising && turn == synchronisedTurn {
-			nodeData.synchroniseChannel <- 0
-			<-nodeData.synchroniseChannel
-			synchronising = false
-			fmt.Println("synced on turn ",turn)
-		}*/
-
 		nextSlice := make([][]byte, len(currentSlice))
 		for i := range nextSlice {
 			nextSlice[i] = make([]byte, len(currentSlice[0]))
@@ -324,16 +354,28 @@ func worker(
 					nextSlice[i][j] = currentSlice[i][j]
 				}
 				if nextSlice[i][j] != currentSlice[i][j] {
-					eventsChannel <- CellFlipped{Cell: util.Cell{X: i, Y: j}, CompletedTurns: turn}
+					eventsChannel <- CellFlipped{Cell: util.Cell{X: i+cellFlipOffset, Y: j}, CompletedTurns: turn}
 				}
 			}
 		}
-		/*select {
-		case <-nodeData.tickerChannel:
-			nodeData.tickerChannel <- getAliveCellsCount(currentSlice)
-			nodeData.turnChannel <- turn
-		default:
-		}*/
+		nodeData.synchroniseChannel <- turn
+		breakingLoop := false
+		select {
+		case <-nodeData.cellsChannel:
+			nodeData.cellsChannel <- getAliveCellsCount(currentSlice)
+		case <-nodeData.pgmChannel:
+			nodeData.pgmChannel <-currentSlice
+		case <-nodeData.pauseChannel:
+			<-nodeData.pauseChannel
+			case <-nodeData.killChannel:
+				breakingLoop = true
+				nodeData.pgmChannel <- currentSlice
+		case <-nodeData.synchroniseChannel:
+
+		}
+		if breakingLoop{
+			break
+		}
 		currentSlice = nextSlice
 	}
 	nodeData.sliceChannel <- currentSlice
@@ -349,32 +391,6 @@ func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHa
 	} else {
 		return fullSlice[boundedI][boundedJ]
 	}
-}
-
-func synchronise(workerNodes []WorkerNode) {
-	//Establishing turn to sync on
-	//latestTurn := 0
-	for i := range workerNodes {
-		workerNodes[i].synchroniseChannel <- 0
-		t := <-workerNodes[i].synchroniseChannel
-		fmt.Println(workerNodes[i].bSendFirst," ",t)
-		/*if t > latestTurn {
-			latestTurn = t
-		}*/
-	}
-	/*
-	//Sending turn to sync on for all workers
-	for i := range workerNodes {
-		workerNodes[i].synchroniseChannel <- latestTurn
-	}
-	//Suspending until workers synchronised
-	for i := range workerNodes {
-		<-workerNodes[i].synchroniseChannel
-	}
-	//Unsuspending workers
-	for i := range workerNodes {
-		workerNodes[i].synchroniseChannel <- 0
-	}*/
 }
 
 //count number of active cells surrounding a current cell
