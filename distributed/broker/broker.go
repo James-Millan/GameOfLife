@@ -159,6 +159,10 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	turns := req.Turns
 	breakLoop := false
 	for turn := 0; turn < turns; turn++ {
+		tickerMutex.Lock()
+		aliveCellsToSend = getAliveCellsCount(currentWorld)
+		turnToSend = turn
+		tickerMutex.Unlock()
 		var nextWorld [][]byte
 		//Splitting up world and distributing to channels
 		distributeWorkers(currentWorld)
@@ -209,10 +213,6 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 			breakLoop = true
 		default:
 		}
-		tickerMutex.Lock()
-		aliveCellsToSend = getAliveCellsCount(currentWorld)
-		turnToSend = turn
-		tickerMutex.Unlock()
 		if breakLoop {
 			break
 		}

@@ -101,8 +101,8 @@ func distributor(p Params, c distributorChannels) {
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	channelClosedLock.Lock()
 	eventsChannelClosed = true
-	close(c.events)
 	channelClosedLock.Unlock()
+	close(c.events)
 }
 
 func readConfigFile(brokerIp *string) {
