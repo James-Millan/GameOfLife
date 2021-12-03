@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -27,11 +28,11 @@ type WorkerNode struct {
 	bSendFirst         bool
 	tSendFirst         bool
 	turnChannel        chan int
-	cellsChannel chan int
+	cellsChannel       chan int
 	synchroniseChannel chan int
-	pgmChannel chan [][]byte
-	pauseChannel chan bool
-	killChannel chan bool
+	pgmChannel         chan [][]byte
+	pauseChannel       chan bool
+	killChannel        chan bool
 }
 
 var sliceMutex sync.Mutex
@@ -63,6 +64,7 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
+	//Initialising channels for workers to communicate via
 	workerNodes := make([]WorkerNode, p.Threads)
 	currentSendsFirst := false
 	for i := 0; i < p.Threads; i++ {
@@ -74,10 +76,10 @@ func distributor(p Params, c distributorChannels) {
 			sliceChannel:       make(chan [][]byte),
 			turnChannel:        make(chan int),
 			synchroniseChannel: make(chan int),
-			cellsChannel: make(chan int),
-			pgmChannel: make(chan [][]byte),
-			pauseChannel: make(chan bool),
-			killChannel: make(chan bool),
+			cellsChannel:       make(chan int),
+			pgmChannel:         make(chan [][]byte),
+			pauseChannel:       make(chan bool),
+			killChannel:        make(chan bool),
 		}
 		currentSendsFirst = !currentSendsFirst
 	}
@@ -89,30 +91,6 @@ func distributor(p Params, c distributorChannels) {
 		workerNodes[i].tIn = workerNodes[boundNumber(i-1, len(workerNodes))].bOut
 	}
 	ticker := time.NewTicker(2 * time.Second)
-	//TODO implement keypress logic.
-
-	// Execute all turns of the Game of Life.
-	//turnCounter := 0
-
-	/*go func() {
-		for  {
-			select {
-			case command := <-c.keyPresses:
-				switch command	{
-				case 'p':
-					fmt.Println("p")
-				case 's':
-					fmt.Println("s")
-					writeFile(p, c, currentWorld, turnCounter)
-				case 'q':
-					fmt.Println("q")
-					writeAndQuit(p, c, currentWorld, turnCounter)
-				}
-			default:
-			}
-		}
-	}()
-	*/
 	turns := p.Turns
 	columnsPerChannel := len(currentWorld) / p.Threads
 	//Splitting up world and distributing to channels
@@ -122,61 +100,62 @@ func distributor(p Params, c distributorChannels) {
 	cellFlipOffset := 0
 	for sliceNum := 0; sliceNum < p.Threads; sliceNum++ {
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainderThreads, &offset)
-		go worker(currentSlice, workerNodes[sliceNum], singleWorker, turns, c.events,cellFlipOffset)
+		go worker(currentSlice, workerNodes[sliceNum], singleWorker, turns, c.events, cellFlipOffset)
 		cellFlipOffset += len(currentSlice)
 	}
 
+	//Sending events to workers
 	breakLoop := false
-	for turn := 0;turn < p.Turns;turn++{
+	for turn := 0; turn < p.Turns; turn++ {
 		syncedTurn := 0
-		for w := range workerNodes{
+		for w := range workerNodes {
 			syncedTurn = <-workerNodes[w].synchroniseChannel
 		}
 		c.events <- TurnComplete{syncedTurn}
 		select {
 		case <-ticker.C:
 			aliveCells := 0
-			for i := range workerNodes{
+			for i := range workerNodes {
 				workerNodes[i].cellsChannel <- 0
 				aliveCells += <-workerNodes[i].cellsChannel
 			}
-			c.events <- AliveCellsCount{CellsCount: aliveCells,CompletedTurns: syncedTurn}
-			case key := <-c.keyPresses:
-				switch key {
-				case 's':
-					imageToWrite := [][]byte{}
-					for i := range workerNodes{
-						workerNodes[i].pgmChannel <- nil
-						imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
-					}
-					writeFile(p,c,imageToWrite,syncedTurn)
-				case 'p':
-					fmt.Println(syncedTurn)
-					for i := range workerNodes{
-						workerNodes[i].pauseChannel <- true
-					}
-					for{
-						resumeKey := <-c.keyPresses
-						if resumeKey == 'p'{
-							fmt.Println("continuing")
-							break
-						}
-					}
-					for i := range workerNodes{
-						workerNodes[i].pauseChannel <- true
-					}
-				case 'q':
-					breakLoop = true
-					imageToWrite := [][]byte{}
-					for i := range workerNodes{
-						workerNodes[i].killChannel <- true
-						imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
-					}
-					writeAndQuit(p,c,imageToWrite,syncedTurn)
+			c.events <- AliveCellsCount{CellsCount: aliveCells, CompletedTurns: syncedTurn}
+		case key := <-c.keyPresses:
+			switch key {
+			case 's':
+				imageToWrite := [][]byte{}
+				for i := range workerNodes {
+					workerNodes[i].pgmChannel <- nil
+					imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
 				}
+				writeFile(p, c, imageToWrite, syncedTurn)
+			case 'p':
+				fmt.Println(syncedTurn)
+				for i := range workerNodes {
+					workerNodes[i].pauseChannel <- true
+				}
+				for {
+					resumeKey := <-c.keyPresses
+					if resumeKey == 'p' {
+						fmt.Println("continuing")
+						break
+					}
+				}
+				for i := range workerNodes {
+					workerNodes[i].pauseChannel <- true
+				}
+			case 'q':
+				breakLoop = true
+				imageToWrite := [][]byte{}
+				for i := range workerNodes {
+					workerNodes[i].killChannel <- true
+					imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
+				}
+				writeAndQuit(p, c, imageToWrite, syncedTurn)
+			}
 
 		default:
-			for i := range workerNodes{
+			for i := range workerNodes {
 				workerNodes[i].synchroniseChannel <- 0
 			}
 		}
@@ -193,50 +172,6 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 	currentWorld = nextWorld
-
-	/*select {
-	case <-ticker.C:
-		cells := getAliveCellsCount(currentWorld)
-		c.events <- AliveCellsCount{CellsCount: cells, CompletedTurns: turnCounter}
-	default:
-	}
-	select {
-	case command := <-c.keyPresses:
-		switch command {
-		case 'p':
-			fmt.Println("p")
-			for {
-				unPause := <-c.keyPresses
-				done := false
-				switch unPause {
-				case 'p':
-					done = true
-					break
-				case 's':
-					writeFile(p, c, currentWorld, turnCounter)
-				case 'q':
-					writeFile(p, c, currentWorld, turnCounter)
-					done = true
-					turn = p.Turns
-				}
-				if done {
-					break
-				}
-			}
-		case 's':
-			fmt.Println("s")
-			writeFile(p, c, currentWorld, turnCounter)
-		case 'q':
-			fmt.Println("q")
-			writeFile(p, c, currentWorld, turnCounter)
-			turn = p.Turns
-		}
-	default:
-	}
-	//update current world.
-	turnCounter++
-	c.events <- TurnComplete{CompletedTurns: turnCounter}
-	*/
 
 	//calculate the alive cells
 	aliveCells := make([]util.Cell, 0, p.ImageWidth*p.ImageHeight)
@@ -260,9 +195,10 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func getPgmFromWorkers(workerNodes []WorkerNode) [][]byte{
+//Sends message to workers to send their slice as a pgm and assembles them
+func getPgmFromWorkers(workerNodes []WorkerNode) [][]byte {
 	imageToWrite := [][]byte{}
-	for i := range workerNodes{
+	for i := range workerNodes {
 		workerNodes[i].pgmChannel <- nil
 		imageToWrite = append(imageToWrite, <-workerNodes[i].pgmChannel...)
 	}
@@ -308,8 +244,6 @@ func worker(
 	cellFlipOffset int) {
 
 	currentSlice := fullSlice
-	//synchronising := false
-	//synchronisedTurn := 0
 
 	for turn := 0; turn < totalTurns; turn++ {
 		bottomHaloToSend := currentSlice[len(currentSlice)-1]
@@ -354,7 +288,7 @@ func worker(
 					nextSlice[i][j] = currentSlice[i][j]
 				}
 				if nextSlice[i][j] != currentSlice[i][j] {
-					eventsChannel <- CellFlipped{Cell: util.Cell{X: i+cellFlipOffset, Y: j}, CompletedTurns: turn}
+					eventsChannel <- CellFlipped{Cell: util.Cell{X: i + cellFlipOffset, Y: j}, CompletedTurns: turn}
 				}
 			}
 		}
@@ -364,16 +298,16 @@ func worker(
 		case <-nodeData.cellsChannel:
 			nodeData.cellsChannel <- getAliveCellsCount(currentSlice)
 		case <-nodeData.pgmChannel:
-			nodeData.pgmChannel <-currentSlice
+			nodeData.pgmChannel <- currentSlice
 		case <-nodeData.pauseChannel:
 			<-nodeData.pauseChannel
-			case <-nodeData.killChannel:
-				breakingLoop = true
-				nodeData.pgmChannel <- currentSlice
+		case <-nodeData.killChannel:
+			breakingLoop = true
+			nodeData.pgmChannel <- currentSlice
 		case <-nodeData.synchroniseChannel:
 
 		}
-		if breakingLoop{
+		if breakingLoop {
 			break
 		}
 		currentSlice = nextSlice
@@ -381,6 +315,7 @@ func worker(
 	nodeData.sliceChannel <- currentSlice
 }
 
+//Retrieves specified cell from world, from halos if necessary
 func getCellWithHalos(i int, j int, fullSlice [][]byte, topHalo []byte, bottomHalo []byte) byte {
 	boundedI := boundNumber(i, len(fullSlice))
 	boundedJ := boundNumber(j, len(fullSlice[boundedI]))
