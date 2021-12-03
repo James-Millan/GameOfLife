@@ -1,16 +1,16 @@
-	package gol
+package gol
 
-	import (
-		"bufio"
-		"fmt"
-		"net/rpc"
-		"os"
-		"strconv"
-		"sync"
-		"time"
+import (
+	"bufio"
+	"fmt"
+	"net/rpc"
+	"os"
+	"strconv"
+	"sync"
+	"time"
 
-		"uk.ac.bris.cs/gameoflife/stubs"
-	)
+	"uk.ac.bris.cs/gameoflife/stubs"
+)
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -58,30 +58,20 @@ func distributor(p Params, c distributorChannels) {
 	}
 	//Execute all turns of the Game of Life.
 
-
 	turns := p.Turns
 	client, err := rpc.Dial("tcp", string(brokerIp))
 	if err != nil {
 		fmt.Println("Distributor dialing error: ", err.Error())
 	}
-	/*defer func(client *rpc.Client) {
-		err := client.Close()
-		if err != nil {
-			fmt.Println(err)
-		}
-	}(client)*/
 	defer client.Close()
-	ticker := time.NewTicker(2*time.Second)
-	go eventsRoutine(client,p,c,ticker)
+	ticker := time.NewTicker(2 * time.Second)
+	go eventsRoutine(client, p, c, ticker)
 	req := stubs.Request{CurrentWorld: currentWorld, Turns: p.Turns}
 	resp := new(stubs.Response)
 	err = client.Call(stubs.BrokerRequest, req, resp)
-	/*if err != nil {
-		fmt.Println(err)
-	}*/
 	ticker.Stop()
 	killLock.Lock()
-	if(!eventsRoutineKilled){
+	if !eventsRoutineKilled {
 		killChannel <- true
 		<-killChannel
 	}
@@ -105,6 +95,7 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
+//Reads the broker's ip from gol/config and set brokerIp to it
 func readConfigFile(brokerIp *string) {
 	file, rerr := os.Open("gol/config")
 	if rerr != nil {
@@ -119,7 +110,8 @@ func readConfigFile(brokerIp *string) {
 	}
 }
 
-func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *time.Ticker){
+//goroutine for event handling
+func eventsRoutine(broker *rpc.Client, p Params, c distributorChannels, ticker *time.Ticker) {
 	breakloop := false
 	paused := false
 	for {
@@ -138,13 +130,7 @@ func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *ti
 				req := new(stubs.GenericMessage)
 				resp := new(stubs.GenericMessage)
 				broker.Call(stubs.KillBroker, req, resp)
-				/*if err != nil {
-					fmt.Println(err)
-				}*/
 				broker.Close()
-				/*if err != nil {
-					fmt.Println(err)
-				}*/
 				breakloop = true
 
 			case 'q':
@@ -180,7 +166,7 @@ func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *ti
 				}
 			}
 		case <-ticker.C:
-			if(!paused) {
+			if !paused {
 				req := stubs.GenericMessage{}
 				resp := new(stubs.AliveCellsResponse)
 				err := broker.Call(stubs.GetAliveCells, req, resp)
@@ -193,12 +179,12 @@ func eventsRoutine(broker *rpc.Client,p Params, c distributorChannels,ticker *ti
 				}
 				channelClosedLock.Unlock()
 			}
-			case <-killChannel:
-				breakloop = true
+		case <-killChannel:
+			breakloop = true
 		default:
 		}
 		if breakloop {
-			if(!eventsRoutineKilled){
+			if !eventsRoutineKilled {
 				killChannel <- true
 			}
 			break

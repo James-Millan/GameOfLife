@@ -65,9 +65,6 @@ func (b *BrokerOperations) Kill(req stubs.GenericMessage, resp *stubs.GenericMes
 		wReq := new(stubs.GenericMessage)
 		wResp := new(stubs.GenericMessage)
 		workerClients[i].Call(stubs.KillWorker, wReq, wResp)
-		/*if err != nil {
-			fmt.Println(err)
-		}*/
 	}
 	err = listener.Close()
 	if err != nil {
@@ -85,16 +82,6 @@ func (b *BrokerOperations) KeyPressPGM(req stubs.GenericMessage, resp *stubs.PGM
 	return
 }
 
-/*func (b *BrokerOperations) SubscribeController(req stubs.SubscriptionRequest, resp *stubs.GenericMessage) (err error){
-	controller,err = rpc.Dial("tcp", req.IP)
-	if err != nil{
-		fmt.Println("Failed to connect to controller on "+req.IP+" - "+err.Error())
-	}else {
-		fmt.Println("Connected to controller on "+req.IP)
-	}
-	return
-}*/
-
 func (b *BrokerOperations) GetAliveCells(req stubs.GenericMessage, resp *stubs.AliveCellsResponse) (err error) {
 	tickerMutex.Lock()
 	resp.Cells = aliveCellsToSend
@@ -108,9 +95,10 @@ func (b *BrokerOperations) DisconnectController(req stubs.GenericMessage, resp *
 	return
 }
 
-func attemptConnectWorkers(){
+//Establishes connection to worker nodes and channels to communicate with them via
+func attemptConnectWorkers() {
 	if len(workerClients) > 0 {
-		for i := range workerClients{
+		for i := range workerClients {
 			workerClients[i].Close()
 		}
 	}
@@ -118,7 +106,7 @@ func attemptConnectWorkers(){
 	clientChannels = []chan [][]uint8{}
 	safetyChannels = []chan bool{}
 	for i := range workers {
-		fmt.Println("Attempting to connect to worker on ",workers[i])
+		fmt.Println("Attempting to connect to worker on ", workers[i])
 		newClient, derr := rpc.Dial("tcp", workers[i])
 		if derr != nil {
 			fmt.Println("Broker dialing error on ", workers[i], " - ", derr.Error())
@@ -131,17 +119,18 @@ func attemptConnectWorkers(){
 	}
 }
 
-func checkFaults(currentWorld [][]uint8){
+//Checks that all worker calls returned correctly, rolls back and redistributes if not
+func checkFaults(currentWorld [][]uint8) {
 	fault := false
-	for i := range safetyChannels{
-		if <-safetyChannels[i] == false{
+	for i := range safetyChannels {
+		if <-safetyChannels[i] == false {
 			fault = true
 		}
 	}
 	if fault {
 		fmt.Println("Fault detected, retrying turn")
 		//Cleaning successful channels
-		for i:= range clientChannels {
+		for i := range clientChannels {
 			<-clientChannels[i]
 		}
 		attemptConnectWorkers()
@@ -150,10 +139,9 @@ func checkFaults(currentWorld [][]uint8){
 	}
 }
 
+//Processes all turns of GOL
 func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response) (err error) {
 	attemptConnectWorkers()
-	//Creating channels and connections to workers nodes
-
 
 	currentWorld := req.CurrentWorld
 	turns := req.Turns
@@ -175,16 +163,7 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 				nextWorld = append(nextWorld, nextSlice[j])
 			}
 		}
-		/*select {
-		case <-ticker.C:
-			cells := getAliveCellsCount(currentWorld)
-			cellsReq := stubs.AliveCellsRequest{Cells: cells,TurnsCompleted: turn}
-			cellsResp := new(stubs.GenericMessage)
-			controller.Call(stubs.ReceiveAliveCells, cellsReq, cellsResp)
-			fmt.Println("sent")
-		default:
-		}*/
-
+		//Event handling
 		pgmMutex.Lock()
 		if requestingPGM {
 			PGMChannel <- currentWorld
@@ -234,12 +213,12 @@ func (b *BrokerOperations) BrokerRequest(req stubs.Request, resp *stubs.Response
 	return
 }
 
-func distributeWorkers(currentWorld [][]byte){
+func distributeWorkers(currentWorld [][]byte) {
 	columnsPerChannel := len(currentWorld) / len(workerClients)
 	remainders := len(currentWorld) % len(workerClients)
 	offset := 0
 	for sliceNum := 0; sliceNum < len(workerClients); sliceNum++ {
-		go callWorker(clientChannels[sliceNum], workerClients[sliceNum],safetyChannels[sliceNum])
+		go callWorker(clientChannels[sliceNum], workerClients[sliceNum], safetyChannels[sliceNum])
 		currentSlice := sliceWorld(sliceNum, columnsPerChannel, currentWorld, &remainders, &offset)
 		clientChannels[sliceNum] <- currentSlice
 	}
@@ -279,14 +258,14 @@ func getAliveCellsCount(currentWorld [][]byte) int {
 	return counter
 }
 
-func callWorker(channel chan [][]uint8, workerClient *rpc.Client,safetyChannel chan bool) {
+func callWorker(channel chan [][]uint8, workerClient *rpc.Client, safetyChannel chan bool) {
 	req := stubs.Request{CurrentWorld: <-channel}
 	resp := new(stubs.Response)
 	err := workerClient.Call(stubs.ProcessSlice, req, resp)
 	if err != nil {
 		safetyChannel <- false
 		channel <- nil
-	}else {
+	} else {
 		safetyChannel <- true
 		channel <- resp.NextWorld
 	}
@@ -301,13 +280,6 @@ func boundNumber(num int, worldLen int) int {
 		return num
 	}
 }
-
-/*func (b *BrokerOperations) Subscribe(req stubs.SubscriptionRequest, resp *stubs.SubscriptionResponses) (err error){
-	//check this for races
-	workers = append(workers, req.IP)
-	resp.Message = "Subscription received"
-	return
-}*/
 
 func main() {
 	pgmMutex = sync.Mutex{}
@@ -327,7 +299,7 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	port := flag.String("port","8040","Port broker will listen on")
+	port := flag.String("port", "8040", "Port broker will listen on")
 	flag.Parse()
 	listener, err = net.Listen("tcp", ":"+*port)
 	if err != nil {
